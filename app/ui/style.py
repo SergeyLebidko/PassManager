@@ -382,6 +382,16 @@ def stylesheet(dark: bool) -> str:
     return DARK_QSS if dark else LIGHT_QSS
 
 
+def apply_theme(app, dark: bool) -> None:
+    """Применяет тему ко всему приложению.
+
+    Нужна, чтобы диалоги, открываемые до создания главного окна
+    (например, ввод мастер-пароля), уже имели единый стиль.
+    """
+    app.setStyleSheet(stylesheet(dark))
+    set_dark(dark)
+
+
 # Текущая тема: используется, чтобы иконки в диалогах подбирали цвет.
 _current_dark = False
 

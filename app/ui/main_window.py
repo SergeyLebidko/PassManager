@@ -246,8 +246,7 @@ class MainWindow(QMainWindow):
     # Тема
     # ------------------------------------------------------------------
     def _apply_theme(self) -> None:
-        self.app.setStyleSheet(style.stylesheet(self.dark))
-        style.set_dark(self.dark)
+        style.apply_theme(self.app, self.dark)
         # На светлой теме показываем луну (включить тёмную) и наоборот.
         self.theme_btn.set_icon_name("sun" if self.dark else "moon")
         self.theme_btn.setToolTip("Включить светлую тему" if self.dark
@@ -702,6 +701,9 @@ def run() -> int:
     app.setApplicationName("PassManager")
     app.setStyle("Fusion")
     _install_russian_translation(app)
+    # Тема применяется до открытия диалогов (в т.ч. ввода мастер-пароля),
+    # иначе они выглядят в стандартном стиле Fusion.
+    style.apply_theme(app, False)
 
     manager = Manager()
 
