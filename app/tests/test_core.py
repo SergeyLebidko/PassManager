@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from app import crypto, storage
+from app import export
 from app.export import build_txt
 from app.manager import Manager
 from app.models import Account, HistoryEntry, Service, Vault
@@ -236,6 +237,43 @@ def test_export_txt_empty_vault() -> None:
     text = build_txt(Vault.empty())
     assert "Список сервисов пуст" in text
     assert "Сервисов: 0" in text
+
+
+def test_write_export_creates_dir_and_file() -> None:
+    vault = Vault.empty()
+    svc = Service(name="Почта")
+    svc.accounts.append(Account(title="A", login="u@mail.ru", password="pw"))
+    vault.services.append(svc)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = export.write_export(vault, base_dir=Path(tmp))
+        assert path.parent == Path(tmp) / "exports"
+        assert path.parent.is_dir()
+        assert path.name.startswith("passmanager-")
+        assert path.name.endswith(".txt")
+        text = path.read_text(encoding="utf-8")
+        assert "СЕРВИС: Почта" in text
+        assert "u@mail.ru" in text
+
+
+def test_write_export_repeated_does_not_overwrite() -> None:
+    vault = Vault.empty()
+    vault.services.append(Service(name="Почта"))
+    with tempfile.TemporaryDirectory() as tmp:
+        first = export.write_export(vault, base_dir=Path(tmp))
+        second = export.write_export(vault, base_dir=Path(tmp))
+        assert first != second
+        assert first.exists() and second.exists()
+        # Оба файла лежат в каталоге exports/.
+        assert len(list(export.export_dir(Path(tmp)).glob("*.txt"))) == 2
+
+
+def test_export_filename_has_timestamp() -> None:
+    import re
+
+    name = export.export_filename()
+    assert re.fullmatch(r"passmanager-\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.txt",
+                        name), name
 
 
 def test_manager_unlock_flow() -> None:

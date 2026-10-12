@@ -3,5 +3,6 @@
 vault.txt
 config.json
 PassManager-error.log
+exports/
 __pycache__/
 *.pyc
