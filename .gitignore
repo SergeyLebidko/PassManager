@@ -1,0 +1,7 @@
+# Локальные данные и окружение
+.venv/
+vault.txt
+config.json
+PassManager-error.log
+__pycache__/
+*.pyc

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=PassManager
+Comment=Менеджер паролей
+Exec=python3 "/home/sergey/Рабочий стол/PassManager/start.py"
+Path=/home/sergey/Рабочий стол/PassManager
+Terminal=false
+Categories=Utility;Security;
