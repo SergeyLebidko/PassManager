@@ -54,23 +54,30 @@ QPushButton:pressed {{
 QPushButton[compact="true"] {{
     padding: 0;
 }}
-QPushButton#primary {{
-    background: {ACCENT};
-    border: 1px solid {ACCENT};
-    color: #ffffff;
+QPushButton#primary, QPushButton#danger {{
+    background: #ffffff;
+    border: 1px solid #d7dae0;
+    color: #1c1f23;
 }}
 QPushButton#primary:hover {{
+    background: {ACCENT};
+    border-color: {ACCENT};
+    color: #ffffff;
+}}
+QPushButton#primary:pressed {{
     background: {ACCENT_HOVER};
     border-color: {ACCENT_HOVER};
-}}
-QPushButton#danger {{
-    background: {DANGER};
-    border: 1px solid {DANGER};
     color: #ffffff;
 }}
 QPushButton#danger:hover {{
+    background: {DANGER};
+    border-color: {DANGER};
+    color: #ffffff;
+}}
+QPushButton#danger:pressed {{
     background: {DANGER_HOVER};
     border-color: {DANGER_HOVER};
+    color: #ffffff;
 }}
 QPushButton#quiet {{
     background: transparent;
@@ -238,23 +245,30 @@ QPushButton:pressed {{
 QPushButton[compact="true"] {{
     padding: 0;
 }}
-QPushButton#primary {{
-    background: {ACCENT};
-    border: 1px solid {ACCENT};
-    color: #ffffff;
+QPushButton#primary, QPushButton#danger {{
+    background: #2b3038;
+    border: 1px solid #363b44;
+    color: #e6e8ec;
 }}
 QPushButton#primary:hover {{
+    background: {ACCENT};
+    border-color: {ACCENT};
+    color: #ffffff;
+}}
+QPushButton#primary:pressed {{
     background: {ACCENT_HOVER};
     border-color: {ACCENT_HOVER};
-}}
-QPushButton#danger {{
-    background: {DANGER};
-    border: 1px solid {DANGER};
     color: #ffffff;
 }}
 QPushButton#danger:hover {{
+    background: {DANGER};
+    border-color: {DANGER};
+    color: #ffffff;
+}}
+QPushButton#danger:pressed {{
     background: {DANGER_HOVER};
     border-color: {DANGER_HOVER};
+    color: #ffffff;
 }}
 QPushButton#quiet {{
     background: transparent;
@@ -366,3 +380,21 @@ QTabBar::tab:selected {{
 
 def stylesheet(dark: bool) -> str:
     return DARK_QSS if dark else LIGHT_QSS
+
+
+# Текущая тема: используется, чтобы иконки в диалогах подбирали цвет.
+_current_dark = False
+
+
+def set_dark(dark: bool) -> None:
+    global _current_dark
+    _current_dark = bool(dark)
+
+
+def is_dark() -> bool:
+    return _current_dark
+
+
+def icon_color() -> str:
+    """Цвет иконок для текущей темы."""
+    return "#e6e9ee" if _current_dark else "#1c1f23"

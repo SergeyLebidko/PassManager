@@ -6,7 +6,7 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QSize, QTimer, Qt
+from PySide6.QtCore import QLibraryInfo, QTimer, Qt, QTranslator
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -37,6 +37,7 @@ from ..manager import Manager, SyncResult
 from ..models import Account, Service, to_date
 from . import style
 from .icons import make_icon
+from .widgets import IconColorButton
 from .dialogs import (
     AccountDialog,
     HistoryDialog,
@@ -74,28 +75,25 @@ class MainWindow(QMainWindow):
     # Построение интерфейса
     # ------------------------------------------------------------------
     def _icon_button(self, icon_name: str, tooltip: str,
-                     obj_name: str = "", color: str = "") -> QPushButton:
+                     obj_name: str = "", color: str = "") -> IconColorButton:
         """Компактная кнопка-иконка с всплывающей подсказкой.
 
-        Если ``color`` не задан, иконка перекрашивается под текущую тему.
+        Цветные роли (``primary``/``danger``) окрашиваются только при
+        наведении; в покое иконка нейтральна к теме.
         """
-        btn = QPushButton()
-        btn.setIconSize(QSize(20, 20))
-        btn.setFixedSize(36, 32)
-        btn.setProperty("compact", "true")
-        btn.setToolTip(tooltip)
-        if obj_name:
-            btn.setObjectName(obj_name)
+        accent = obj_name in ("primary", "danger")
+        btn = IconColorButton(icon_name, tooltip, obj_name, accent=accent)
         if color:
             btn.setIcon(make_icon(icon_name, color))
-        else:
-            btn.setProperty("iconName", icon_name)
         return btn
 
     def _recolor_icons(self) -> None:
-        """Перерисовывает «обычные» иконки под цвет текущей темы."""
-        color = "#e6e9ee" if self.dark else "#1c1f23"
+        """Перекрашивает иконки под цвет текущей темы."""
+        color = style.icon_color()
         for btn in self.findChildren(QPushButton):
+            if isinstance(btn, IconColorButton):
+                btn.refresh_icon()
+                continue
             name = btn.property("iconName")
             if name:
                 btn.setIcon(make_icon(name, color))
@@ -138,12 +136,12 @@ class MainWindow(QMainWindow):
 
         svc_buttons = QHBoxLayout()
         svc_buttons.setSpacing(6)
-        add_service = self._icon_button("add", "Добавить сервис", "primary", "#ffffff")
+        add_service = self._icon_button("add", "Добавить сервис", "primary")
         add_service.clicked.connect(self.add_service)
         edit_service = self._icon_button("edit", "Изменить сервис")
         edit_service.clicked.connect(self.edit_service)
         del_service = self._icon_button("trash", "Удалить сервис в корзину",
-                                        "danger", "#ffffff")
+                                        "danger")
         del_service.clicked.connect(self.delete_service)
         svc_buttons.addWidget(add_service)
         svc_buttons.addWidget(edit_service)
@@ -187,12 +185,12 @@ class MainWindow(QMainWindow):
         acc_buttons = QHBoxLayout()
         acc_buttons.setSpacing(6)
         add_acc = self._icon_button("add", "Добавить учётную запись",
-                                    "primary", "#ffffff")
+                                    "primary")
         add_acc.clicked.connect(self.add_account)
         edit_acc = self._icon_button("edit", "Изменить учётную запись")
         edit_acc.clicked.connect(self.edit_account)
         del_acc = self._icon_button("trash", "Удалить учётную запись в корзину",
-                                    "danger", "#ffffff")
+                                    "danger")
         del_acc.clicked.connect(self.delete_account)
         copy_login = self._icon_button("person", "Копировать логин")
         copy_login.clicked.connect(self.copy_login)
@@ -249,8 +247,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     def _apply_theme(self) -> None:
         self.app.setStyleSheet(style.stylesheet(self.dark))
+        style.set_dark(self.dark)
         # На светлой теме показываем луну (включить тёмную) и наоборот.
-        self.theme_btn.setProperty("iconName", "sun" if self.dark else "moon")
+        self.theme_btn.set_icon_name("sun" if self.dark else "moon")
         self.theme_btn.setToolTip("Включить светлую тему" if self.dark
                                   else "Включить тёмную тему")
         self._recolor_icons()
@@ -554,11 +553,7 @@ class MainWindow(QMainWindow):
             notify(self, "Экспорт", "Нет сервисов для экспорта.")
             return
         default_name = time.strftime("passmanager-%Y-%m-%d.txt")
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Экспорт в текстовый файл",
-            str(Path.home() / default_name),
-            "Текстовые файлы (*.txt);;Все файлы (*)",
-        )
+        path = self._ask_save_path(str(Path.home() / default_name))
         if not path:
             return
         if not path.lower().endswith(".txt"):
@@ -575,6 +570,29 @@ class MainWindow(QMainWindow):
                f"{path}\n\n"
                "ВНИМАНИЕ: пароли в файле хранятся в открытом виде. "
                "Храните его в защищённом месте.")
+
+    def _ask_save_path(self, default_path: str) -> str:
+        """Диалог сохранения файла с русскими подписями кнопок.
+
+        Нативный диалог ОС не подчиняется Qt, поэтому используем
+        собственный (не нативный) вариант ``QFileDialog``.
+        """
+        dialog = QFileDialog(self, "Экспорт в текстовый файл")
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        dialog.setAcceptMode(QFileDialog.AcceptSave)
+        dialog.setFileMode(QFileDialog.AnyFile)
+        dialog.setNameFilters(["Текстовые файлы (*.txt)", "Все файлы (*)"])
+        dialog.setDefaultSuffix("txt")
+        dialog.selectFile(default_path)
+        dialog.setLabelText(QFileDialog.Accept, "Сохранить")
+        dialog.setLabelText(QFileDialog.Reject, "Отмена")
+        dialog.setLabelText(QFileDialog.FileName, "Имя файла:")
+        dialog.setLabelText(QFileDialog.LookIn, "Папка:")
+        dialog.setLabelText(QFileDialog.FileType, "Тип файлов:")
+        if dialog.exec():
+            files = dialog.selectedFiles()
+            return files[0] if files else ""
+        return ""
 
     # ------------------------------------------------------------------
     # Настройки
@@ -669,10 +687,21 @@ class MainWindow(QMainWindow):
         self._schedule_sync()
 
 
+def _install_russian_translation(app: QApplication) -> None:
+    """Подключает русский перевод стандартных строк Qt (диалоги и т.п.)."""
+    path = QLibraryInfo.path(QLibraryInfo.TranslationsPath)
+    for name in ("qtbase_ru", "qt_ru"):
+        translator = QTranslator(app)
+        if translator.load(name, path):
+            app.installTranslator(translator)
+            app._ru_translator = translator  # держим ссылку, чтобы не собрался GC
+
+
 def run() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("PassManager")
     app.setStyle("Fusion")
+    _install_russian_translation(app)
 
     manager = Manager()
 
