@@ -426,16 +426,12 @@ class MainWindow(QMainWindow):
         dlg = AccountDialog(account, service_name=service.name, parent=self)
         if dlg.exec():
             data = dlg.result_data
-            # История фиксируется до изменения комментария/логина, чтобы
-            # сохранить прежнее состояние записи.
-            if data["login"] != account.login:
-                account.change_login(data["login"])
-            if data["password"] != account.password:
-                account.change_password(data["password"])
-            account.title = data["title"]
-            account.login = data["login"]
-            account.comment = data["comment"]
-            account.touch()
+            # История фиксируется до изменений, чтобы сохранить прежнее
+            # состояние записи (каждое изменение — отдельная запись истории).
+            account.change_title(data["title"])
+            account.change_login(data["login"])
+            account.change_password(data["password"])
+            account.change_comment(data["comment"])
             service.touch()
             self._persist()
             self.refresh_services(select_id=service.id)
