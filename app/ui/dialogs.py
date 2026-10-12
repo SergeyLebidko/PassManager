@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 
 from ..models import Account, HistoryEntry, Service, TrashItem, to_iso
+from . import style
+from .icons import make_icon
 
 
 # --------------------------------------------------------------------------
@@ -60,6 +62,67 @@ def notify(parent, title: str, text: str, icon=QMessageBox.Information) -> None:
     ok = box.addButton("ОК", QMessageBox.AcceptRole)
     box.setDefaultButton(ok)
     box.exec()
+
+
+def icon_button(icon_name: str, tooltip: str,
+                obj_name: str = "", color: str = ""):
+    """Компактная кнопка-иконка с всплывающей подсказкой.
+
+    Для цветных ролей (``primary``/``danger``) иконка белеет только при
+    наведении; в покое — нейтрального цвета темы. Явный ``color``
+    используется для иконок на постоянно цветном фоне.
+    """
+    from .widgets import IconColorButton
+
+    accent = obj_name in ("primary", "danger")
+    btn = IconColorButton(icon_name, tooltip, obj_name, accent=accent)
+    if color:
+        btn.setIcon(make_icon(icon_name, color))
+    return btn
+
+
+def text_icon_button(icon_name: str, text: str,
+                     obj_name: str = "", color: str = "",
+                     icon_size: int = 16) -> QPushButton:
+    """Кнопка с иконкой и текстом (текст сохраняется)."""
+    btn = QPushButton(text)
+    btn.setIconSize(QSize(icon_size, icon_size))
+    btn.setIcon(make_icon(icon_name, color or style.icon_color()))
+    btn.setProperty("iconName", icon_name)
+    if obj_name:
+        btn.setObjectName(obj_name)
+    return btn
+
+
+def set_box_icons(box: "QDialogButtonBox",
+                  mapping: dict) -> None:
+    """Проставляет иконки стандартным кнопкам ``QDialogButtonBox``.
+
+    ``mapping`` — словарь ``{QDialogButtonBox.StandardButton: имя_иконки}``.
+    """
+    for standard, icon_name in mapping.items():
+        button = box.button(standard)
+        if button is None:
+            continue
+        button.setIcon(make_icon(icon_name, style.icon_color()))
+        button.setIconSize(QSize(16, 16))
+        button.setProperty("iconName", icon_name)
+
+
+def equalize_button_widths(*buttons: QPushButton) -> None:
+    """Выравнивает ширину кнопок по самой широкой.
+
+    Удобно для пар «Отмена»/«Сохранить», чтобы они выглядели единообразно.
+    """
+    buttons = [b for b in buttons if b is not None]
+    if not buttons:
+        return
+    width = 0
+    for btn in buttons:
+        btn.ensurePolished()
+        width = max(width, btn.sizeHint().width())
+    for btn in buttons:
+        btn.setFixedWidth(width)
 
 
 def copy_to_clipboard(text: str, owner: QWidget | None = None) -> None:
@@ -107,15 +170,13 @@ class CopyableField(QWidget):
         layout.addWidget(self.edit, 1)
 
         if masked:
-            self.toggle = QPushButton("Показать")
-            self.toggle.setObjectName("quiet")
+            self.toggle = text_icon_button("eye", "Показать", "quiet")
             self.toggle.setCheckable(True)
-            self.toggle.setFixedWidth(90)
+            self.toggle.setFixedWidth(104)
             self.toggle.toggled.connect(self._toggle)
             layout.addWidget(self.toggle)
 
-        self.copy = QPushButton("Копировать")
-        self.copy.setObjectName("quiet")
+        self.copy = text_icon_button("copy", "Копировать", "quiet")
         self.copy.clicked.connect(self._copy)
         layout.addWidget(self.copy)
 
@@ -125,6 +186,8 @@ class CopyableField(QWidget):
     def _toggle(self, shown: bool) -> None:
         self.edit.setEchoMode(QLineEdit.Normal if shown else QLineEdit.Password)
         self.toggle.setText("Скрыть" if shown else "Показать")
+        self.toggle.setIcon(make_icon("eye-off" if shown else "eye",
+                                      style.icon_color()))
 
     def text(self) -> str:
         return self.edit.text()
@@ -180,6 +243,10 @@ class MasterPasswordDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Создать" if creating else "Открыть")
         buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        set_box_icons(buttons, {
+            QDialogButtonBox.Ok: "check",
+            QDialogButtonBox.Cancel: "close",
+        })
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -219,6 +286,10 @@ class ServiceDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Сохранить")
         buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        set_box_icons(buttons, {
+            QDialogButtonBox.Ok: "save",
+            QDialogButtonBox.Cancel: "close",
+        })
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -287,6 +358,10 @@ class AccountDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Сохранить")
         buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        set_box_icons(buttons, {
+            QDialogButtonBox.Ok: "save",
+            QDialogButtonBox.Cancel: "close",
+        })
         buttons.accepted.connect(self._accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -352,15 +427,14 @@ class HistoryDialog(QDialog):
         layout.addWidget(self.table)
 
         controls = QHBoxLayout()
-        self.reveal_btn = QPushButton("Показать пароли")
-        self.reveal_btn.setObjectName("quiet")
+        self.reveal_btn = text_icon_button("eye", "Показать пароли", "quiet")
         self.reveal_btn.setCheckable(True)
         self.reveal_btn.toggled.connect(self._toggle_reveal)
         controls.addWidget(self.reveal_btn)
 
-        self.copy_login_btn = QPushButton("Копировать логин")
+        self.copy_login_btn = text_icon_button("person", "Копировать логин")
         self.copy_login_btn.clicked.connect(self._copy_login)
-        self.copy_password_btn = QPushButton("Копировать пароль")
+        self.copy_password_btn = text_icon_button("key", "Копировать пароль")
         self.copy_password_btn.clicked.connect(self._copy_password)
         controls.addStretch(1)
         controls.addWidget(self.copy_login_btn)
@@ -374,6 +448,7 @@ class HistoryDialog(QDialog):
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.button(QDialogButtonBox.Close).setText("Закрыть")
+        set_box_icons(buttons, {QDialogButtonBox.Close: "close"})
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)
@@ -403,6 +478,8 @@ class HistoryDialog(QDialog):
     def _toggle_reveal(self, shown: bool) -> None:
         self._reveal = shown
         self.reveal_btn.setText("Скрыть пароли" if shown else "Показать пароли")
+        self.reveal_btn.setIcon(make_icon("eye-off" if shown else "eye",
+                                          style.icon_color()))
         for row, entry in enumerate(self._entries):
             item = self.table.item(row, 2)
             if item is not None:
@@ -497,14 +574,20 @@ class SettingsDialog(QDialog):
 
         # Кнопка проверки и кнопки «Отмена»/«Сохранить» — в одной строке.
         bottom_row = QHBoxLayout()
-        self.test_btn = QPushButton("Проверить подключение")
+        self.test_btn = text_icon_button("plug", "Проверить подключение")
         bottom_row.addWidget(self.test_btn, 0, Qt.AlignVCenter)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Сохранить")
         buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        set_box_icons(buttons, {
+            QDialogButtonBox.Ok: "save",
+            QDialogButtonBox.Cancel: "close",
+        })
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        equalize_button_widths(buttons.button(QDialogButtonBox.Ok),
+                               buttons.button(QDialogButtonBox.Cancel))
         bottom_row.addStretch(1)
         bottom_row.addWidget(buttons, 0, Qt.AlignVCenter)
         layout.addLayout(bottom_row)
@@ -636,24 +719,22 @@ class TrashDialog(QDialog):
         layout.addWidget(self.table)
 
         row = QHBoxLayout()
-        self.restore_btn = QPushButton("Восстановить")
-        self.restore_btn.setObjectName("primary")
-        self.delete_btn = QPushButton("Удалить навсегда")
-        self.delete_btn.setObjectName("danger")
-        self.clear_btn = QPushButton("Очистить корзину")
-        self.clear_btn.setObjectName("danger")
-        close_btn = QPushButton("Закрыть")
+        row.setSpacing(6)
+        self.restore_btn = icon_button(
+            "restore", "Восстановить выбранный элемент", "primary")
+        self.delete_btn = icon_button(
+            "trash", "Удалить выбранный элемент навсегда", "danger")
+        self.clear_btn = icon_button(
+            "clear", "Очистить корзину полностью", "danger")
         row.addWidget(self.restore_btn)
         row.addWidget(self.delete_btn)
         row.addStretch(1)
         row.addWidget(self.clear_btn)
-        row.addWidget(close_btn)
         layout.addLayout(row)
 
         self.restore_btn.clicked.connect(lambda: self._select("restore"))
         self.delete_btn.clicked.connect(lambda: self._select("delete"))
         self.clear_btn.clicked.connect(lambda: self._select("clear"))
-        close_btn.clicked.connect(self.reject)
 
     def _select(self, action: str) -> None:
         if action in ("restore", "delete"):

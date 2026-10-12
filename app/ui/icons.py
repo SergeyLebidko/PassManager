@@ -1,137 +1,95 @@
-"""Программно рисуемые иконки для кнопок (без внешних файлов).
+"""Иконки для кнопок на основе SVG из набора Lucide.
 
-Иконки рисуются с помощью ``QPainter``, поэтому автоматически
-подстраиваются под размер и цвет текущей темы.
+SVG-файлы лежат в ``app/ui/assets/icons`` и используют
+``stroke="currentColor"``. При отрисовке готовая маска перекрашивается
+в нужный цвет (``CompositionMode_SourceIn``), поэтому одна и та же
+иконка подходит и для светлой, и для тёмной темы, и для цветных кнопок.
+
+Публичный интерфейс: :func:`make_icon`.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import (
-    QColor,
-    QIcon,
-    QPainter,
-    QPainterPath,
-    QPen,
-    QPixmap,
-)
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 
-_CACHE: dict[tuple[str, str, int], QIcon] = {}
+_ASSET_DIR = Path(__file__).resolve().parent / "assets" / "icons"
 
+# Имя иконки -> файл ассета (обычно совпадают).
+_FILES: dict[str, str] = {
+    "add": "add.svg",
+    "edit": "edit.svg",
+    "trash": "trash.svg",
+    "restore": "restore.svg",
+    "clear": "clear.svg",
+    "close": "x.svg",
+    "person": "person.svg",
+    "key": "key.svg",
+    "clock": "clock.svg",
+    "moon": "moon.svg",
+    "sun": "sun.svg",
+    "link": "link.svg",
+    "save": "save.svg",
+    "copy": "copy.svg",
+    "eye": "eye.svg",
+    "eye-off": "eye-off.svg",
+    "plug": "plug.svg",
+    "check": "check.svg",
+}
 
-def _pen(color: str, size: int, width_ratio: float = 0.085) -> QPen:
-    pen = QPen(QColor(color))
-    pen.setWidthF(max(1.6, size * width_ratio))
-    pen.setCapStyle(Qt.RoundCap)
-    pen.setJoinStyle(Qt.RoundJoin)
-    return pen
-
-
-def _draw(name: str, p: QPainter, s: int) -> None:
-    """Отрисовка фигуры по имени в квадрате ``s`` на ``s``."""
-    def pt(x: float, y: float) -> tuple[float, float]:
-        return x * s, y * s
-
-    if name == "add":
-        p.drawLine(*pt(0.5, 0.22), *pt(0.5, 0.78))
-        p.drawLine(*pt(0.22, 0.5), *pt(0.78, 0.5))
-
-    elif name == "edit":
-        path = QPainterPath()
-        path.moveTo(*pt(0.16, 0.84))
-        path.lineTo(*pt(0.22, 0.60))
-        path.lineTo(*pt(0.64, 0.18))
-        path.lineTo(*pt(0.82, 0.36))
-        path.lineTo(*pt(0.40, 0.78))
-        path.closeSubpath()
-        p.drawPath(path)
-        p.drawLine(*pt(0.57, 0.25), *pt(0.75, 0.43))
-
-    elif name == "trash":
-        p.drawLine(*pt(0.16, 0.28), *pt(0.84, 0.28))
-        p.drawLine(*pt(0.38, 0.28), *pt(0.38, 0.18))
-        p.drawLine(*pt(0.38, 0.18), *pt(0.62, 0.18))
-        p.drawLine(*pt(0.62, 0.18), *pt(0.62, 0.28))
-        body = QPainterPath()
-        body.moveTo(*pt(0.26, 0.34))
-        body.lineTo(*pt(0.30, 0.84))
-        body.lineTo(*pt(0.70, 0.84))
-        body.lineTo(*pt(0.74, 0.34))
-        p.drawPath(body)
-        p.drawLine(*pt(0.42, 0.44), *pt(0.44, 0.74))
-        p.drawLine(*pt(0.58, 0.44), *pt(0.56, 0.74))
-
-    elif name == "copy":
-        back = QPainterPath()
-        back.moveTo(*pt(0.36, 0.44))
-        back.lineTo(*pt(0.36, 0.18))
-        back.lineTo(*pt(0.82, 0.18))
-        back.lineTo(*pt(0.82, 0.64))
-        back.lineTo(*pt(0.60, 0.64))
-        p.drawPath(back)
-        front = QPainterPath()
-        front.addRoundedRect(QRectF(0.18 * s, 0.38 * s, 0.44 * s, 0.44 * s),
-                             0.09 * s, 0.09 * s)
-        p.drawPath(front)
-
-    elif name == "person":
-        p.drawEllipse(QRectF(0.34 * s, 0.16 * s, 0.32 * s, 0.32 * s))
-        shoulders = QPainterPath()
-        shoulders.arcMoveTo(QRectF(0.18 * s, 0.56 * s, 0.64 * s, 0.52 * s), 0)
-        shoulders.arcTo(QRectF(0.18 * s, 0.56 * s, 0.64 * s, 0.52 * s), 0, 180)
-        p.drawPath(shoulders)
-
-    elif name == "key":
-        p.drawEllipse(QRectF(0.14 * s, 0.36 * s, 0.30 * s, 0.30 * s))
-        p.drawLine(*pt(0.44, 0.51), *pt(0.86, 0.51))
-        p.drawLine(*pt(0.68, 0.51), *pt(0.68, 0.66))
-        p.drawLine(*pt(0.79, 0.51), *pt(0.79, 0.63))
-
-    elif name == "clock":
-        p.drawEllipse(QRectF(0.18 * s, 0.18 * s, 0.64 * s, 0.64 * s))
-        p.drawLine(*pt(0.50, 0.50), *pt(0.50, 0.30))
-        p.drawLine(*pt(0.50, 0.50), *pt(0.66, 0.58))
-
-    elif name == "search":
-        p.drawEllipse(QRectF(0.18 * s, 0.18 * s, 0.44 * s, 0.44 * s))
-        p.drawLine(*pt(0.58, 0.58), *pt(0.82, 0.82))
-
-    elif name == "moon":
-        color = p.pen().color()
-        full = QPainterPath()
-        full.addEllipse(QRectF(0.20 * s, 0.18 * s, 0.62 * s, 0.62 * s))
-        cut = QPainterPath()
-        cut.addEllipse(QRectF(0.46 * s, 0.08 * s, 0.60 * s, 0.60 * s))
-        crescent = full.subtracted(cut)
-        p.setPen(Qt.NoPen)
-        p.fillPath(crescent, color)
-
-    elif name == "sun":
-        p.drawEllipse(QRectF(0.36 * s, 0.36 * s, 0.28 * s, 0.28 * s))
-        for angle in range(0, 360, 45):
-            p.save()
-            p.translate(0.5 * s, 0.5 * s)
-            p.rotate(angle)
-            p.drawLine(0.30 * s, 0, 0.42 * s, 0)
-            p.restore()
+# Кэши: отрендеренные иконки и загруженные рендереры.
+_ICON_CACHE: dict[tuple[str, str, int], QIcon] = {}
+_RENDERERS: dict[str, QSvgRenderer] = {}
 
 
-def make_icon(name: str, color: str, size: int = 20) -> QIcon:
-    """Возвращает иконку ``name`` указанного цвета (кэшируется)."""
-    key = (name, color, size)
-    cached = _CACHE.get(key)
+def _renderer(name: str) -> QSvgRenderer | None:
+    """Загружает (с кэшированием) рендерер SVG для иконки."""
+    cached = _RENDERERS.get(name)
     if cached is not None:
         return cached
 
+    filename = _FILES.get(name)
+    if filename is None:
+        return None
+    path = _ASSET_DIR / filename
+    if not path.exists():
+        return None
+
+    renderer = QSvgRenderer(str(path))
+    if not renderer.isValid():
+        return None
+    _RENDERERS[name] = renderer
+    return renderer
+
+
+def make_icon(name: str, color: str, size: int = 20) -> QIcon:
+    """Возвращает иконку ``name`` указанного цвета (кэшируется).
+
+    ``color`` — цвет линий иконки; ``size`` — сторона квадрата в пикселях.
+    """
+    key = (name, color, size)
+    cached = _ICON_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    renderer = _renderer(name)
+    if renderer is None:
+        return QIcon()
+
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
+
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
-    painter.setPen(_pen(color, size))
-    painter.setBrush(Qt.NoBrush)
-    _draw(name, painter, size)
+    renderer.render(painter, QRectF(0, 0, size, size))
+    # Перекрашиваем непрозрачные пиксели в нужный цвет.
+    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    painter.fillRect(pixmap.rect(), QColor(color))
     painter.end()
 
     icon = QIcon(pixmap)
-    _CACHE[key] = icon
+    _ICON_CACHE[key] = icon
     return icon
