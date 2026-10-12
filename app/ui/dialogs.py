@@ -99,7 +99,10 @@ def set_box_icons(box: "QDialogButtonBox",
     """Проставляет иконки стандартным кнопкам ``QDialogButtonBox``.
 
     ``mapping`` — словарь ``{QDialogButtonBox.StandardButton: имя_иконки}``.
+    Все затронутые кнопки получают иконки одного размера и одинаковую
+    ширину — чтобы вид был единым во всех диалогах.
     """
+    touched = []
     for standard, icon_name in mapping.items():
         button = box.button(standard)
         if button is None:
@@ -107,6 +110,8 @@ def set_box_icons(box: "QDialogButtonBox",
         button.setIcon(make_icon(icon_name, style.icon_color()))
         button.setIconSize(QSize(16, 16))
         button.setProperty("iconName", icon_name)
+        touched.append(button)
+    equalize_button_widths(*touched)
 
 
 def equalize_button_widths(*buttons: QPushButton) -> None:
@@ -586,8 +591,6 @@ class SettingsDialog(QDialog):
         })
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        equalize_button_widths(buttons.button(QDialogButtonBox.Ok),
-                               buttons.button(QDialogButtonBox.Cancel))
         bottom_row.addStretch(1)
         bottom_row.addWidget(buttons, 0, Qt.AlignVCenter)
         layout.addLayout(bottom_row)
