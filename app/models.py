@@ -46,14 +46,16 @@ def to_date(ts: float | None) -> str:
 
 @dataclass
 class HistoryEntry:
+    title: str = ""
     login: str = ""
     password: str = ""
     changed_at: float = field(default_factory=now)
     comment: str = ""
-    kind: str = "password"  # "password" | "login"
+    kind: str = "password"  # "password" | "login" | "title" | "comment"
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "title": self.title,
             "login": self.login,
             "password": self.password,
             "changed_at": self.changed_at,
@@ -64,6 +66,7 @@ class HistoryEntry:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "HistoryEntry":
         return cls(
+            title=data.get("title", ""),
             login=data.get("login", ""),
             password=data.get("password", ""),
             changed_at=float(data.get("changed_at", now())),
@@ -82,23 +85,33 @@ class Account:
     created_at: float = field(default_factory=now)
     password_changed_at: float = field(default_factory=now)
     login_changed_at: float = field(default_factory=now)
+    title_changed_at: float = field(default_factory=now)
+    comment_changed_at: float = field(default_factory=now)
     history: list[HistoryEntry] = field(default_factory=list)
     modified_at: float = field(default_factory=now)
 
     def touch(self) -> None:
         self.modified_at = now()
 
+    def _snapshot(self, kind: str, changed_at: float) -> HistoryEntry:
+        """Снимок текущего состояния записи для истории."""
+        return HistoryEntry(
+            title=self.title,
+            login=self.login,
+            password=self.password,
+            changed_at=changed_at,
+            comment=self.comment,
+            kind=kind,
+        )
+
     def change_password(self, new_password: str, comment: str | None = None) -> None:
         """Меняет пароль, сохраняя предыдущее состояние в истории."""
         if new_password == self.password:
             return
-        self.history.insert(0, HistoryEntry(
-            login=self.login,
-            password=self.password,
-            changed_at=self.password_changed_at,
-            comment=self.comment if comment is None else comment,
-            kind="password",
-        ))
+        entry = self._snapshot("password", self.password_changed_at)
+        if comment is not None:
+            entry.comment = comment
+        self.history.insert(0, entry)
         self.password = new_password
         self.password_changed_at = now()
         self.touch()
@@ -107,15 +120,30 @@ class Account:
         """Меняет логин, сохраняя предыдущее состояние в истории."""
         if new_login == self.login:
             return
-        self.history.insert(0, HistoryEntry(
-            login=self.login,
-            password=self.password,
-            changed_at=self.login_changed_at,
-            comment=self.comment if comment is None else comment,
-            kind="login",
-        ))
+        entry = self._snapshot("login", self.login_changed_at)
+        if comment is not None:
+            entry.comment = comment
+        self.history.insert(0, entry)
         self.login = new_login
         self.login_changed_at = now()
+        self.touch()
+
+    def change_title(self, new_title: str) -> None:
+        """Меняет название, сохраняя предыдущее состояние в истории."""
+        if new_title == self.title:
+            return
+        self.history.insert(0, self._snapshot("title", self.title_changed_at))
+        self.title = new_title
+        self.title_changed_at = now()
+        self.touch()
+
+    def change_comment(self, new_comment: str) -> None:
+        """Меняет комментарий, сохраняя предыдущее состояние в истории."""
+        if new_comment == self.comment:
+            return
+        self.history.insert(0, self._snapshot("comment", self.comment_changed_at))
+        self.comment = new_comment
+        self.comment_changed_at = now()
         self.touch()
 
     def to_dict(self) -> dict[str, Any]:
@@ -128,22 +156,26 @@ class Account:
             "created_at": self.created_at,
             "password_changed_at": self.password_changed_at,
             "login_changed_at": self.login_changed_at,
+            "title_changed_at": self.title_changed_at,
+            "comment_changed_at": self.comment_changed_at,
             "history": [h.to_dict() for h in self.history],
             "modified_at": self.modified_at,
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Account":
+        created = float(data.get("created_at", now()))
         return cls(
             id=data.get("id") or new_id(),
             title=data.get("title", ""),
             login=data.get("login", ""),
             password=data.get("password", ""),
             comment=data.get("comment", ""),
-            created_at=float(data.get("created_at", now())),
+            created_at=created,
             password_changed_at=float(data.get("password_changed_at", now())),
-            login_changed_at=float(data.get("login_changed_at",
-                                           data.get("created_at", now()))),
+            login_changed_at=float(data.get("login_changed_at", created)),
+            title_changed_at=float(data.get("title_changed_at", created)),
+            comment_changed_at=float(data.get("comment_changed_at", created)),
             history=[HistoryEntry.from_dict(h) for h in data.get("history", [])],
             modified_at=float(data.get("modified_at", now())),
         )

@@ -412,23 +412,26 @@ class HistoryDialog(QDialog):
     def __init__(self, account: Account, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"История — {account.title or account.login}")
-        self.resize(820, 460)
+        self.resize(920, 460)
         self._account = account
         self._entries: list[HistoryEntry] = list(account.history)
         self._reveal = False
         layout = QVBoxLayout(self)
 
         current = QLabel(
+            f"Название изменено: {to_iso(account.title_changed_at)}   •   "
             f"Логин изменён: {to_iso(account.login_changed_at)}   •   "
-            f"Пароль изменён: {to_iso(account.password_changed_at)}"
+            f"Пароль изменён: {to_iso(account.password_changed_at)}   •   "
+            f"Комментарий изменён: {to_iso(account.comment_changed_at)}"
         )
         current.setObjectName("subtitleLabel")
         current.setWordWrap(True)
         layout.addWidget(current)
 
-        self.table = QTableWidget(0, 5)
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
-            ["Изменено", "Логин", "Пароль", "Дата смены", "Комментарий"])
+            ["Изменено", "Название", "Логин", "Пароль", "Дата смены",
+             "Комментарий"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -440,10 +443,11 @@ class HistoryDialog(QDialog):
         header.setMinimumSectionSize(60)
         header.setSectionsMovable(True)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        header.resizeSection(0, 100)
-        header.resizeSection(1, 190)
-        header.resizeSection(2, 140)
-        header.resizeSection(3, 150)
+        header.resizeSection(0, 100)   # Изменено
+        header.resizeSection(1, 160)   # Название
+        header.resizeSection(2, 180)   # Логин
+        header.resizeSection(3, 120)   # Пароль
+        header.resizeSection(4, 140)   # Дата смены
         self.table.currentCellChanged.connect(lambda *_: self._update_buttons())
 
         for entry in self._entries:
@@ -483,16 +487,19 @@ class HistoryDialog(QDialog):
         row = self.table.rowCount()
         self.table.insertRow(row)
 
-        kind = QTableWidgetItem("Логин" if entry.kind == "login" else "Пароль")
+        labels = {"login": "Логин", "password": "Пароль",
+                  "title": "Название", "comment": "Комментарий"}
+        kind = QTableWidgetItem(labels.get(entry.kind, "Пароль"))
         kind.setData(Qt.UserRole, entry)
         self.table.setItem(row, 0, kind)
 
-        self.table.setItem(row, 1, QTableWidgetItem(entry.login))
+        self.table.setItem(row, 1, QTableWidgetItem(entry.title))
+        self.table.setItem(row, 2, QTableWidgetItem(entry.login))
         pw_item = QTableWidgetItem(self._mask(entry.password))
         pw_item.setData(Qt.UserRole, entry.password)
-        self.table.setItem(row, 2, pw_item)
-        self.table.setItem(row, 3, QTableWidgetItem(to_iso(entry.changed_at)))
-        self.table.setItem(row, 4, QTableWidgetItem(entry.comment))
+        self.table.setItem(row, 3, pw_item)
+        self.table.setItem(row, 4, QTableWidgetItem(to_iso(entry.changed_at)))
+        self.table.setItem(row, 5, QTableWidgetItem(entry.comment))
 
     def _mask(self, password: str) -> str:
         if self._reveal:
@@ -505,7 +512,7 @@ class HistoryDialog(QDialog):
         self.reveal_btn.setIcon(make_icon("eye-off" if shown else "eye",
                                           style.icon_color()))
         for row, entry in enumerate(self._entries):
-            item = self.table.item(row, 2)
+            item = self.table.item(row, 3)
             if item is not None:
                 item.setText(self._mask(entry.password))
 

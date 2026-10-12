@@ -137,6 +137,43 @@ def test_history_kind_persists() -> None:
     assert restored.login_changed_at == acc.login_changed_at
 
 
+def test_history_on_title_and_comment_change() -> None:
+    acc = Account(title="Старое", login="u", password="p", comment="старый коммент")
+    acc.change_title("Новое")
+    acc.change_comment("новый коммент")
+    assert acc.title == "Новое"
+    assert acc.comment == "новый коммент"
+    kinds = [h.kind for h in acc.history]
+    assert kinds == ["comment", "title"], kinds
+    # Снимок хранит прежние значения.
+    assert acc.history[0].comment == "старый коммент"
+    assert acc.history[1].title == "Старое"
+
+
+def test_history_title_comment_persist() -> None:
+    acc = Account(title="t", login="u", password="p", comment="c")
+    acc.change_title("t2")
+    acc.change_comment("c2")
+    restored = Account.from_dict(acc.to_dict())
+    kinds = [h.kind for h in restored.history]
+    assert kinds == ["comment", "title"], kinds
+    assert restored.title_changed_at == acc.title_changed_at
+    assert restored.comment_changed_at == acc.comment_changed_at
+    # Старый формат без новых полей читается без ошибок.
+    legacy = {"login": "u", "password": "p", "changed_at": 1.0}
+    old = Account.from_dict(legacy)
+    assert old.title_changed_at == old.created_at
+
+
+def test_no_history_when_nothing_changed() -> None:
+    acc = Account(title="t", login="u", password="p", comment="c")
+    acc.change_title("t")
+    acc.change_comment("c")
+    acc.change_login("u")
+    acc.change_password("p")
+    assert acc.history == []
+
+
 def test_trash_and_restore() -> None:
     vault = Vault.empty()
     svc = Service(name="S")
