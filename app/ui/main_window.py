@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import sys
-import time
-from pathlib import Path
 
 from PySide6.QtCore import QLibraryInfo, QTimer, Qt, QTranslator
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
-    QFileDialog,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -32,9 +29,10 @@ from PySide6.QtWidgets import (
 
 from .. import storage
 from ..crypto import CryptoError, WrongPasswordError
-from ..export import build_txt
+from ..export import write_export
 from ..manager import Manager, SyncResult
 from ..models import Account, Service, to_date
+from ..reveal import reveal_in_file_manager
 from . import style
 from .icons import make_icon
 from .widgets import IconColorButton
@@ -551,47 +549,19 @@ class MainWindow(QMainWindow):
         if not self.manager.vault.services:
             notify(self, "Экспорт", "Нет сервисов для экспорта.")
             return
-        default_name = time.strftime("passmanager-%Y-%m-%d.txt")
-        path = self._ask_save_path(str(Path.home() / default_name))
-        if not path:
-            return
-        if not path.lower().endswith(".txt"):
-            path += ".txt"
         try:
-            Path(path).write_text(build_txt(self.manager.vault), encoding="utf-8")
+            path = write_export(self.manager.vault)
         except OSError as exc:
             notify(self, "Ошибка экспорта", f"Не удалось записать файл:\n{exc}",
                    QMessageBox.Critical)
             return
+        reveal_in_file_manager(path)
         self.set_status(f"Данные экспортированы: {path}")
         notify(self, "Экспорт завершён",
                "Данные сохранены в файл:\n"
                f"{path}\n\n"
                "ВНИМАНИЕ: пароли в файле хранятся в открытом виде. "
                "Храните его в защищённом месте.")
-
-    def _ask_save_path(self, default_path: str) -> str:
-        """Диалог сохранения файла с русскими подписями кнопок.
-
-        Нативный диалог ОС не подчиняется Qt, поэтому используем
-        собственный (не нативный) вариант ``QFileDialog``.
-        """
-        dialog = QFileDialog(self, "Экспорт в текстовый файл")
-        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
-        dialog.setAcceptMode(QFileDialog.AcceptSave)
-        dialog.setFileMode(QFileDialog.AnyFile)
-        dialog.setNameFilters(["Текстовые файлы (*.txt)", "Все файлы (*)"])
-        dialog.setDefaultSuffix("txt")
-        dialog.selectFile(default_path)
-        dialog.setLabelText(QFileDialog.Accept, "Сохранить")
-        dialog.setLabelText(QFileDialog.Reject, "Отмена")
-        dialog.setLabelText(QFileDialog.FileName, "Имя файла:")
-        dialog.setLabelText(QFileDialog.LookIn, "Папка:")
-        dialog.setLabelText(QFileDialog.FileType, "Тип файлов:")
-        if dialog.exec():
-            files = dialog.selectedFiles()
-            return files[0] if files else ""
-        return ""
 
     # ------------------------------------------------------------------
     # Настройки

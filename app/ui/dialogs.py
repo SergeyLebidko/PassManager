@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -166,6 +167,9 @@ class CopyableField(QWidget):
     def __init__(self, text: str = "", masked: bool = True, parent=None) -> None:
         super().__init__(parent)
         self.masked = masked
+        # Не растягиваемся по высоте: иначе в QFormLayout поле «уезжает»
+        # вниз от своей подписи при увеличении окна.
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
@@ -199,6 +203,20 @@ class CopyableField(QWidget):
 
     def setText(self, value: str) -> None:
         self.edit.setText(value)
+
+
+class CommentEdit(QPlainTextEdit):
+    """Многострочный комментарий.
+
+    По умолчанию компактный, но при увеличении размера диалога забирает
+    свободное место — так подписи полей остаются на месте.
+    """
+
+    _DEFAULT_HEIGHT = 90
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt-стиль)
+        base = super().sizeHint()
+        return QSize(base.width(), self._DEFAULT_HEIGHT)
 
 
 # --------------------------------------------------------------------------
@@ -336,8 +354,9 @@ class AccountDialog(QDialog):
         self.title.setPlaceholderText("Краткое название (необязательно)")
         self.login = CopyableField(account.login if account else "", masked=False)
         self.password = CopyableField(account.password if account else "", masked=True)
-        self.comment = QPlainTextEdit(account.comment if account else "")
-        self.comment.setFixedHeight(80)
+        self.comment = CommentEdit(account.comment if account else "")
+        self.comment.setMinimumHeight(80)
+        self.comment.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
         form.addRow("Название:", self.title)
         form.addRow("Логин:", self.login)
