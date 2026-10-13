@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from app import crypto, storage
 from app import export
+from app import search
 from app.export import build_txt
 from app.manager import Manager
 from app.models import Account, HistoryEntry, Service, Vault
@@ -172,6 +173,52 @@ def test_no_history_when_nothing_changed() -> None:
     acc.change_login("u")
     acc.change_password("p")
     assert acc.history == []
+
+
+def test_search_service_name_and_account_fields() -> None:
+    svc = Service(name="Gmail")
+    acc = Account(title="Личная почта", login="user@gmail.com",
+                  password="secret", comment="рабочая переписка")
+    svc.accounts.append(acc)
+
+    # По имени сервиса.
+    assert search.service_matches(svc, "gmail")
+    assert search.service_name_matches(svc, "GMAIL")
+    # По названию записи.
+    assert search.service_matches(svc, "личная")
+    # По логину.
+    assert search.service_matches(svc, "user@")
+    # По комментарию.
+    assert search.service_matches(svc, "переписк")
+    # Нет совпадения.
+    assert not search.service_matches(svc, "steam")
+
+
+def test_search_ignores_password() -> None:
+    svc = Service(name="Банк")
+    svc.accounts.append(Account(title="Основная", login="l", password="topsecret"))
+    assert not search.service_matches(svc, "topsecret")
+    assert not search.account_matches(svc.accounts[0], "topsecret")
+
+
+def test_search_matching_fields() -> None:
+    acc = Account(title="Моя почта", login="me@mail.ru", comment="важное")
+    assert search.matching_fields(acc, "почта") == {"title"}
+    assert search.matching_fields(acc, "mail") == {"login"}
+    assert search.matching_fields(acc, "важн") == {"comment"}
+    assert search.matching_fields(acc, "me@mail.ru") == {"login"}
+    assert search.matching_fields(acc, "") == set()
+
+
+def test_search_empty_and_counts() -> None:
+    svc = Service(name="Почта")
+    svc.accounts.append(Account(title="A", login="a@a", comment=""))
+    svc.accounts.append(Account(title="B", login="b@b", comment="нужное"))
+    # Пустой запрос показывает всё.
+    assert search.service_matches(svc, "  ")
+    assert search.matched_account_count(svc, "") == 0
+    # Считаем только совпавшие записи.
+    assert search.matched_account_count(svc, "нужное") == 1
 
 
 def test_trash_and_restore() -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import QLibraryInfo, QTimer, Qt, QTranslator
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -33,6 +33,7 @@ from ..export import write_export
 from ..manager import Manager, SyncResult
 from ..models import Account, Service, to_date
 from ..reveal import reveal_in_file_manager
+from .. import search as search_mod
 from . import style
 from .icons import make_icon
 from .widgets import IconColorButton
@@ -122,7 +123,7 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(8)
 
         search = QLineEdit()
-        search.setPlaceholderText("Поиск сервиса...")
+        search.setPlaceholderText("Поиск по сервисам, логинам, комментариям...")
         search.textChanged.connect(self._filter_services)
         self.search = search
         left_layout.addWidget(search)
@@ -250,6 +251,8 @@ class MainWindow(QMainWindow):
         self.theme_btn.setToolTip("Включить светлую тему" if self.dark
                                   else "Включить тёмную тему")
         self._recolor_icons()
+        # Пересчитываем подсветку поиска под новые цвета темы.
+        self._filter_services(self.search.text())
         # Высоту верхних строк считаем только после применения стилей,
         # иначе sizeHint поля поиска занижен (padding ещё не учтён).
         QTimer.singleShot(0, self._align_headers)
@@ -301,15 +304,50 @@ class MainWindow(QMainWindow):
             return
         for row in range(self.service_list.count()):
             item = self.service_list.item(row)
-            if item.data(Qt.UserRole) == service_id:
+            if item.data(Qt.UserRole) == service_id and not item.isHidden():
                 self.service_list.setCurrentItem(item)
                 return
 
     def _filter_services(self, text: str) -> None:
-        text = (text or "").strip().lower()
+        """Скрывает несовпавшие сервисы и подсвечивает найденное."""
+        query = search_mod.normalize(text)
         for row in range(self.service_list.count()):
             item = self.service_list.item(row)
-            item.setHidden(bool(text) and text not in item.text().lower())
+            service = self.manager.vault.service(item.data(Qt.UserRole))
+            if service is None or not query:
+                item.setHidden(False)
+                self._set_service_highlight(item, False)
+                continue
+            matched = search_mod.service_matches(service, query)
+            item.setHidden(not matched)
+            # Подсвечиваем сервис при любом совпадении — и по имени,
+            # и по полям входящих в него учётных записей.
+            self._set_service_highlight(item, matched)
+
+        # Если текущий сервис скрыт запросом, выбираем первый видимый.
+        current = self.service_list.currentItem()
+        if current is not None and current.isHidden():
+            self._select_first_visible()
+        self.refresh_accounts()
+
+    def _set_service_highlight(self, item: QListWidgetItem, matched: bool) -> None:
+        """Подсвечивает элемент списка сервисов при совпадении с запросом."""
+        font = item.font()
+        font.setBold(matched)
+        item.setFont(font)
+        if matched:
+            item.setBackground(QBrush(QColor(style.highlight_color())))
+            item.setForeground(QBrush(QColor(style.highlight_text_color())))
+        else:
+            item.setBackground(QBrush(Qt.NoBrush))
+            item.setForeground(QBrush(Qt.NoBrush))
+
+    def _select_first_visible(self) -> None:
+        for row in range(self.service_list.count()):
+            item = self.service_list.item(row)
+            if not item.isHidden():
+                self.service_list.setCurrentItem(item)
+                return
 
     def current_service(self) -> Service | None:
         item = self.service_list.currentItem()
@@ -331,7 +369,18 @@ class MainWindow(QMainWindow):
             return
         self.accounts_label.setText(f"Учётные записи — {service.name}")
 
+        query = search_mod.normalize(self.search.text()
+                                     if hasattr(self, "search") else "")
+        # Если совпадений в сервисе нет вовсе (например, сервис совпал
+        # только по имени), показываем все его записи.
+        service_matched_by_name = bool(
+            query and search_mod.service_name_matches(service, query))
         for acc in service.accounts:
+            fields = search_mod.matching_fields(acc, query) if query else set()
+            # Прячем записи без совпадений, кроме случая, когда сервис
+            # целиком совпал по имени.
+            if query and not fields and not service_matched_by_name:
+                continue
             row = self.accounts_table.rowCount()
             self.accounts_table.insertRow(row)
             title = QTableWidgetItem(acc.title)
@@ -341,6 +390,27 @@ class MainWindow(QMainWindow):
             self.accounts_table.setItem(row, 2, QTableWidgetItem("•" * min(len(acc.password), 12) or "—"))
             self.accounts_table.setItem(row, 3, QTableWidgetItem(acc.comment))
             self.accounts_table.setItem(row, 4, QTableWidgetItem(to_date(acc.password_changed_at)))
+            self._highlight_account_row(row, acc, query)
+
+    def _highlight_account_row(self, row: int, acc: Account, query: str) -> None:
+        """Подсвечивает совпавшие с запросом поля учётной записи."""
+        fields = search_mod.matching_fields(acc, query)
+        if not fields:
+            return
+        color = QBrush(QColor(style.highlight_color()))
+        text = QBrush(QColor(style.highlight_text_color()))
+        columns = {"title": 0, "login": 1, "comment": 3}
+        for field, column in columns.items():
+            if field not in fields:
+                continue
+            item = self.accounts_table.item(row, column)
+            if item is None:
+                continue
+            item.setBackground(color)
+            item.setForeground(text)
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
 
     def current_account(self) -> Account | None:
         service = self.current_service()
