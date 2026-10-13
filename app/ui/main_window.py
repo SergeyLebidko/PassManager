@@ -531,13 +531,20 @@ class MainWindow(QMainWindow):
         service = self._require_service()
         if service is None:
             return
-        dlg = AccountDialog(service_name=service.name, parent=self)
+        dlg = AccountDialog(service_name=service.name,
+                            services=self.manager.vault.services,
+                            current_service_id=service.id, parent=self)
         if dlg.exec():
-            acc = Account(**dlg.result_data)
-            service.add_account_top(acc)
-            service.touch()
+            data = dlg.result_data
+            target = (self.manager.vault.service(data["service_id"])
+                      or service)
+            acc = Account(title=data["title"], login=data["login"],
+                          password=data["password"], comment=data["comment"])
+            target.add_account_top(acc)
+            target.touch()
             self._persist()
-            self.refresh_services(select_id=service.id)
+            self.refresh_services(select_id=target.id)
+            self.refresh_accounts(select_id=acc.id)
             self.set_status("Учётная запись добавлена.")
 
     def edit_account(self) -> None:
@@ -545,7 +552,9 @@ class MainWindow(QMainWindow):
         if account is None:
             return
         service = self.current_service()
-        dlg = AccountDialog(account, service_name=service.name, parent=self)
+        dlg = AccountDialog(account, service_name=service.name,
+                            services=self.manager.vault.services,
+                            current_service_id=service.id, parent=self)
         if dlg.exec():
             data = dlg.result_data
             # История фиксируется до изменений, чтобы сохранить прежнее
@@ -554,9 +563,21 @@ class MainWindow(QMainWindow):
             account.change_login(data["login"])
             account.change_password(data["password"])
             account.change_comment(data["comment"])
+            target = self.manager.vault.service(data["service_id"])
+            if target is not None and target is not service:
+                # Перенос в другой сервис — своя запись истории, порядок
+                # сортировки сбрасывается (запись встаёт в начало).
+                self.manager.vault.move_account(account, service, target)
+                self._account_sort_field = None
+                self._persist()
+                self.refresh_services(select_id=target.id)
+                self.refresh_accounts(select_id=account.id)
+                self.set_status(f"Учётная запись перенесена в «{target.name}».")
+                return
             service.touch()
             self._persist()
             self.refresh_services(select_id=service.id)
+            self.refresh_accounts(select_id=account.id)
             self.set_status("Учётная запись сохранена.")
 
     def delete_account(self) -> None:
