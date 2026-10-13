@@ -408,3 +408,13 @@ def is_dark() -> bool:
 def icon_color() -> str:
     """Цвет иконок для текущей темы."""
     return "#e6e9ee" if _current_dark else "#1c1f23"
+
+
+def highlight_color() -> str:
+    """Фон подсветки найденных совпадений при поиске."""
+    return "#5a4a1a" if _current_dark else "#fff2b8"
+
+
+def highlight_text_color() -> str:
+    """Цвет текста в подсвеченных совпадениях."""
+    return "#ffe9a8" if _current_dark else "#5a4700"
