@@ -360,6 +360,117 @@ def test_export_filename_has_timestamp() -> None:
                         name), name
 
 
+def test_add_service_goes_top() -> None:
+    vault = Vault.empty()
+    vault.add_service(Service(name="B"))
+    vault.add_service(Service(name="A"))
+    # Новый сервис попадает в начало, порядок — целые позиции.
+    assert [s.name for s in vault.services] == ["A", "B"]
+    assert [s.order for s in vault.services] == [0.0, 1.0]
+
+
+def test_add_account_goes_top() -> None:
+    svc = Service(name="S")
+    svc.add_account_top(Account(title="first"))
+    svc.add_account_top(Account(title="second"))
+    assert [a.title for a in svc.accounts] == ["second", "first"]
+
+
+def test_sort_services_asc_desc() -> None:
+    from app import order
+
+    vault = Vault.empty()
+    for name in ("Банан", "яблоко", "Апельсин"):
+        vault.add_service(Service(name=name))
+    order.apply_service_sort(vault, descending=False)
+    assert [s.name for s in vault.services] == ["Апельсин", "Банан", "яблоко"]
+    order.apply_service_sort(vault, descending=True)
+    assert [s.name for s in vault.services] == ["яблоко", "Банан", "Апельсин"]
+
+
+def test_sort_accounts_fields_no_password() -> None:
+    from app import order
+
+    svc = Service(name="S")
+    for title, login, comment, changed in (
+        ("Б", "b@b", "коммент", 200.0),
+        ("А", "a@a", "", 100.0),
+    ):
+        svc.add_account_top(Account(title=title, login=login, comment=comment,
+                                    password_changed_at=changed))
+    order.apply_account_sort(svc, "title", descending=False)
+    assert [a.title for a in svc.accounts] == ["А", "Б"]
+    order.apply_account_sort(svc, "login", descending=True)
+    assert [a.login for a in svc.accounts] == ["b@b", "a@a"]
+    order.apply_account_sort(svc, "password_changed_at", descending=False)
+    assert [a.title for a in svc.accounts] == ["А", "Б"]
+    # Пароль сортировать нельзя.
+    try:
+        order.sort_account_ids(svc, "password")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Ожидалась ошибка для сортировки по паролю")
+
+
+def test_empty_values_sorted_last() -> None:
+    from app import order
+
+    svc = Service(name="S")
+    for title in ("Б", "", "А"):
+        svc.add_account_top(Account(title=title))
+    order.apply_account_sort(svc, "title", descending=False)
+    assert [a.title for a in svc.accounts] == ["А", "Б", ""]
+    # Пустые остаются в конце и при убывании.
+    order.apply_account_sort(svc, "title", descending=True)
+    assert [a.title for a in svc.accounts] == ["Б", "А", ""]
+
+
+def test_order_migrates_from_legacy_data() -> None:
+    legacy = {
+        "version": 1,
+        "services": [
+            {"id": "s1", "name": "Первый",
+             "accounts": [{"id": "a1", "title": "A"}, {"id": "a2", "title": "B"}]},
+            {"id": "s2", "name": "Второй", "accounts": []},
+        ],
+    }
+    vault = Vault.from_dict(legacy)
+    # Порядок из файла сохраняется, позиции становятся плотными.
+    assert [s.id for s in vault.services] == ["s1", "s2"]
+    assert [s.order for s in vault.services] == [0.0, 1.0]
+    assert [a.id for a in vault.services[0].accounts] == ["a1", "a2"]
+    assert [a.order for a in vault.services[0].accounts] == [0.0, 1.0]
+
+
+def test_order_roundtrips() -> None:
+    svc = Service(name="S")
+    svc.add_account_top(Account(title="a"))
+    svc.add_account_top(Account(title="b"))
+    restored = Service.from_dict(svc.to_dict())
+    assert [a.title for a in restored.accounts] == ["b", "a"]
+    assert [a.order for a in restored.accounts] == [0.0, 1.0]
+
+
+def test_merge_keeps_newer_order_content_independent() -> None:
+    from app import order
+
+    # Устройство A отсортировало сервисы по алфавиту (новый порядок).
+    a = Vault.empty()
+    a.add_service(Service(id="s1", name="Б"))
+    a.add_service(Service(id="s2", name="А"))
+    order.apply_service_sort(a, descending=False)
+
+    # Устройство B изменило содержимое, но не порядок.
+    b = Vault.empty()
+    b.add_service(Service(id="s1", name="Б-правка"))
+    b.add_service(Service(id="s2", name="А"))
+
+    merged = merge(a, b)
+    # Порядок взят с A (более новый order_at): сначала "А", затем "Б".
+    assert [s.id for s in merged.services] == ["s2", "s1"]
+
+
 def test_manager_unlock_flow() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE

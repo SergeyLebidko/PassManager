@@ -129,6 +129,23 @@ QMenuBar::item:selected {{
     background: #e6edfd;
     border-radius: 6px;
 }}
+QMenu {{
+    background: #ffffff;
+    border: 1px solid #d7dae0;
+    padding: 6px;
+}}
+QMenu::item {{
+    padding: 6px 26px 6px 26px;
+    border-radius: 6px;
+}}
+QMenu::item:selected {{
+    background: #e6edfd;
+}}
+QMenu::separator {{
+    height: 1px;
+    background: #e2e5ea;
+    margin: 4px 8px;
+}}
 QToolBar {{
     background: #ffffff;
     border-bottom: 1px solid #e2e5ea;
@@ -317,6 +334,24 @@ QMenuBar::item:selected {{
     background: #33415e;
     border-radius: 6px;
 }}
+QMenu {{
+    background: #262a31;
+    border: 1px solid #363b44;
+    padding: 6px;
+    color: #e6e8ec;
+}}
+QMenu::item {{
+    padding: 6px 26px 6px 26px;
+    border-radius: 6px;
+}}
+QMenu::item:selected {{
+    background: #33415e;
+}}
+QMenu::separator {{
+    height: 1px;
+    background: #363b44;
+    margin: 4px 8px;
+}}
 QToolBar {{
     background: #262a31;
     border-bottom: 1px solid #363b44;
@@ -418,3 +453,8 @@ def highlight_color() -> str:
 def highlight_text_color() -> str:
     """Цвет текста в подсвеченных совпадениях."""
     return "#ffe9a8" if _current_dark else "#5a4700"
+
+
+def accent_color() -> str:
+    """Акцентный цвет (линия вставки при перетаскивании)."""
+    return ACCENT
