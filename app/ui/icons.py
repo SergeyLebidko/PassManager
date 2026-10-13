@@ -91,6 +91,54 @@ _FILES: dict[str, str] = {
     "rocket": "rocket.svg",
     "tv": "tv.svg",
     "map-pin": "map-pin.svg",
+    "headphones": "headphones.svg",
+    "mic": "mic.svg",
+    "image": "image.svg",
+    "printer": "printer.svg",
+    "keyboard": "keyboard.svg",
+    "mouse": "mouse.svg",
+    "battery-charging": "battery-charging.svg",
+    "bike": "bike.svg",
+    "bus": "bus.svg",
+    "train-front": "train-front.svg",
+    "ship": "ship.svg",
+    "fuel": "fuel.svg",
+    "utensils": "utensils.svg",
+    "pizza": "pizza.svg",
+    "wine": "wine.svg",
+    "dumbbell": "dumbbell.svg",
+    "stethoscope": "stethoscope.svg",
+    "pill": "pill.svg",
+    "school": "school.svg",
+    "castle": "castle.svg",
+    "tent": "tent.svg",
+    "mountain": "mountain.svg",
+    "umbrella": "umbrella.svg",
+    "flame": "flame.svg",
+    "zap": "zap.svg",
+    "crown": "crown.svg",
+    "gem": "gem.svg",
+    "anchor": "anchor.svg",
+    "compass": "compass.svg",
+    "puzzle": "puzzle.svg",
+    "ticket": "ticket.svg",
+    "receipt": "receipt.svg",
+    "calculator": "calculator.svg",
+    "piggy-bank": "piggy-bank.svg",
+    "handshake": "handshake.svg",
+    "id-card": "id-card.svg",
+    "bot": "bot.svg",
+    "ghost": "ghost.svg",
+    "cat": "cat.svg",
+    "dog": "dog.svg",
+    "fish": "fish.svg",
+    "bug": "bug.svg",
+    "leaf": "leaf.svg",
+    "flower": "flower.svg",
+    "radio": "radio.svg",
+    "popcorn": "popcorn.svg",
+    "clapperboard": "clapperboard.svg",
+    "dices": "dices.svg",
 }
 
 # Иконки, доступные пользователю для сервисов и учётных записей.
@@ -106,6 +154,16 @@ ICON_POOL: list[str] = [
     "heart", "star", "shield", "users", "code",
     "terminal", "cpu", "package", "gift", "trophy",
     "palette", "rocket", "tv", "map-pin",
+    "headphones", "mic", "image", "printer", "keyboard",
+    "mouse", "battery-charging", "bike", "bus", "train-front",
+    "ship", "fuel", "utensils", "pizza", "wine",
+    "dumbbell", "stethoscope", "pill", "school", "castle",
+    "tent", "mountain", "umbrella", "flame", "zap",
+    "crown", "gem", "anchor", "compass", "puzzle",
+    "ticket", "receipt", "calculator", "piggy-bank", "handshake",
+    "id-card", "bot", "ghost", "cat", "dog",
+    "fish", "bug", "leaf", "flower", "radio",
+    "popcorn", "clapperboard", "dices",
 ]
 
 # Кэши: отрендеренные иконки и загруженные рендереры.
@@ -154,6 +212,39 @@ def make_icon(name: str, color: str, size: int = 20) -> QIcon:
     painter.setRenderHint(QPainter.Antialiasing, True)
     renderer.render(painter, QRectF(0, 0, size, size))
     # Перекрашиваем непрозрачные пиксели в нужный цвет.
+    painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+    painter.fillRect(pixmap.rect(), QColor(color))
+    painter.end()
+
+    icon = QIcon(pixmap)
+    _ICON_CACHE[key] = icon
+    return icon
+
+
+def make_cell_icon(name: str, color: str, cell: int = 48,
+                   glyph: int = 24) -> QIcon:
+    """Иконка для ячейки сетки: глиф ``glyph`` по центру квадрата ``cell``.
+
+    Используется в выборе иконок. Глиф отрисовывается в прозрачном
+    ``cell × cell`` pixmap, поэтому стандартный делегат ``QListWidget``
+    рисует его ровно по центру ячейки (без смещения вверх, которое даёт
+    обычная иконка с зарезервированным местом под подпись).
+    """
+    key = ("cell:" + name, color, cell, glyph)
+    cached = _ICON_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    renderer = _renderer(name)
+    if renderer is None:
+        return QIcon()
+
+    pixmap = QPixmap(cell, cell)
+    pixmap.fill(Qt.transparent)
+    offset = (cell - glyph) / 2
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing, True)
+    renderer.render(painter, QRectF(offset, offset, glyph, glyph))
     painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
     painter.fillRect(pixmap.rect(), QColor(color))
     painter.end()

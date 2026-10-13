@@ -5,16 +5,17 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
-    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListView,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -22,14 +23,13 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ..models import Account, HistoryEntry, Service, TrashItem, to_iso
 from . import style
-from .icons import ICON_POOL, make_icon
+from .icons import ICON_POOL, make_cell_icon, make_icon
 from .widgets import RoundedComboBox
 
 
@@ -299,6 +299,41 @@ class MasterPasswordDialog(QDialog):
 # Выбор иконки
 # --------------------------------------------------------------------------
 
+class _IconGrid(QListWidget):
+    """Сетка иконок, которая перестраивается при изменении размера.
+
+    ``QListWidget`` в режиме ``IconMode`` сам перекладывает строки под
+    доступную ширину (``ResizeMode.Adjust``), поэтому при растягивании
+    окна иконки не «прилипают» к прежней сетке. Иконки рендерятся во всю
+    ячейку (см. :func:`app.ui.icons.make_cell_icon`) — так глиф оказывается
+    по центру, а подсветка выделения остаётся квадратной.
+    """
+
+    CELL = 48
+    GLYPH = 24
+    MARGIN = 14
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setViewMode(QListView.IconMode)
+        self.setResizeMode(QListView.Adjust)
+        self.setMovement(QListView.Static)
+        self.setWrapping(True)
+        self.setUniformItemSizes(True)
+        self.setSpacing(0)
+        self.setIconSize(QSize(self.CELL, self.CELL))
+        self.setGridSize(QSize(self.CELL, self.CELL))
+        self.setSelectionMode(QListWidget.SingleSelection)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollMode(QListWidget.ScrollPerPixel)
+        self.setEditTriggers(QListWidget.NoEditTriggers)
+        # Зазор со всех сторон: задаём через viewport (QSS-``padding`` ломает
+        # расчёт числа колонок в ``IconMode``, из-за чего справа оставалась
+        # пустая полоса шириной в колонку).
+        self.setViewportMargins(self.MARGIN, self.MARGIN,
+                                self.MARGIN, self.MARGIN)
+
+
 class IconPickerDialog(QDialog):
     """Сетка иконок из пула для выбора иконки сервиса/учётной записи.
 
@@ -306,11 +341,10 @@ class IconPickerDialog(QDialog):
     «Без иконки» очищает ранее установленную иконку.
     """
 
-    COLUMNS = 8
-
     def __init__(self, current: str = "", parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Выбор иконки")
+        self.resize(680, 480)
         self.selected = current or ""
 
         layout = QVBoxLayout(self)
@@ -318,24 +352,22 @@ class IconPickerDialog(QDialog):
         title.setObjectName("titleLabel")
         layout.addWidget(title)
 
-        grid = QGridLayout()
-        grid.setSpacing(6)
-        self._group = QButtonGroup(self)
-        self._group.setExclusive(True)
-        for index, name in enumerate(ICON_POOL):
-            btn = QToolButton()
-            btn.setCheckable(True)
-            btn.setAutoRaise(True)
-            btn.setFixedSize(46, 46)
-            btn.setIconSize(QSize(22, 22))
-            btn.setIcon(make_icon(name, style.icon_color()))
-            btn.setToolTip(name)
-            btn.setChecked(name == self.selected)
-            btn.clicked.connect(lambda _c=False, n=name: self._choose(n))
-            self._group.addButton(btn)
-            grid.addWidget(btn, index // self.COLUMNS, index % self.COLUMNS)
-        layout.addLayout(grid)
-        grid.setColumnStretch(self.COLUMNS, 1)
+        self._list = _IconGrid()
+        self._list.setObjectName("iconGrid")
+        color = style.icon_color()
+        for name in ICON_POOL:
+            icon = make_cell_icon(name, color, self._list.CELL,
+                                  self._list.GLYPH)
+            item = QListWidgetItem(icon, "")
+            item.setData(Qt.UserRole, name)
+            item.setToolTip(name)
+            item.setSizeHint(QSize(self._list.CELL, self._list.CELL))
+            self._list.addItem(item)
+            if name == self.selected:
+                self._list.setCurrentItem(item)
+        self._list.itemClicked.connect(
+            lambda item: self._choose(item.data(Qt.UserRole)))
+        layout.addWidget(self._list, 1)
 
         buttons = QDialogButtonBox()
         none_btn = buttons.addButton("Без иконки", QDialogButtonBox.ResetRole)

@@ -120,19 +120,8 @@ QPushButton#quiet:hover {{
     background: #e6edfd;
     border-radius: 6px;
 }}
-QToolButton {{
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    padding: 4px;
-}}
-QToolButton:hover {{
-    background: #eef1f6;
-    border-color: #d7dae0;
-}}
-QToolButton:checked {{
-    background: #e6edfd;
-    border-color: {ACCENT};
+QListWidget#iconGrid::item {{
+    padding: 0px;
 }}
 QListWidget, QTreeWidget, QTableWidget {{
     background: #ffffff;
@@ -366,19 +355,8 @@ QPushButton#quiet:hover {{
     background: #2b3038;
     border-radius: 6px;
 }}
-QToolButton {{
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    padding: 4px;
-}}
-QToolButton:hover {{
-    background: #343a44;
-    border-color: #363b44;
-}}
-QToolButton:checked {{
-    background: #33415e;
-    border-color: {ACCENT};
+QListWidget#iconGrid::item {{
+    padding: 0px;
 }}
 QListWidget, QTreeWidget, QTableWidget {{
     background: #262a31;
@@ -536,6 +514,11 @@ def highlight_color() -> str:
 def highlight_text_color() -> str:
     """Цвет текста в подсвеченных совпадениях."""
     return "#ffe9a8" if _current_dark else "#5a4700"
+
+
+def icon_hover_color() -> str:
+    """Фон ячейки иконки при наведении (в сетке выбора иконок)."""
+    return "#343a44" if _current_dark else "#eef1f6"
 
 
 def accent_color() -> str:
