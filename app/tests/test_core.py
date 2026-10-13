@@ -471,6 +471,101 @@ def test_merge_keeps_newer_order_content_independent() -> None:
     assert [s.id for s in merged.services] == ["s2", "s1"]
 
 
+def test_move_account_between_services() -> None:
+    vault = Vault.empty()
+    source = Service(id="s1", name="Почта")
+    target = Service(id="s2", name="Банк")
+    vault.services = [source, target]
+    acc = Account(id="a1", title="Главная", login="u", password="p")
+    source.accounts.append(acc)
+
+    vault.move_account(acc, source, target)
+
+    assert source.account("a1") is None
+    assert target.account("a1") is acc
+    assert target.accounts[0] is acc          # встала в начало
+    assert acc.history[0].kind == "move"
+    assert acc.history[0].comment == "Почта → Банк"
+    assert acc.location_at > 0
+
+
+def test_move_account_same_service_is_noop() -> None:
+    source = Service(id="s1", name="Почта")
+    acc = Account(id="a1", title="X")
+    source.accounts.append(acc)
+    vault = Vault.empty()
+    vault.services = [source]
+    vault.move_account(acc, source, source)
+    assert source.account("a1") is acc
+    assert acc.history == []
+
+
+def test_merge_move_account_no_duplicate() -> None:
+    # A не знает о переносе, B перенёс запись из «Почты» в «Банк».
+    a = Vault.empty()
+    a.services = [Service(id="s1", name="Почта"),
+                  Service(id="s2", name="Банк")]
+    a.services[0].accounts.append(Account(id="a1", title="X", login="u"))
+
+    b = Vault.from_dict(a.to_dict())
+    src = b.services[0]
+    dst = b.services[1]
+    b.move_account(src.accounts[0], src, dst)
+
+    merged = merge(a, b)
+    почта, банк = merged.service("s1"), merged.service("s2")
+    assert почта.account("a1") is None
+    assert банк.account("a1") is not None
+    # Ровно одна копия записи во всём хранилище.
+    assert merged.all_account_count() == 1
+
+
+def test_merge_deletion_in_trash_does_not_resurrect() -> None:
+    # A не удалял, B переместил запись в корзину — после слияния она в корзине.
+    a = Vault.empty()
+    s = Service(id="s1", name="Почта")
+    s.accounts.append(Account(id="a1", title="X", login="u"))
+    a.services = [s]
+
+    b = Vault.from_dict(a.to_dict())
+    b.trash_account(b.services[0], b.services[0].accounts[0])
+
+    merged = merge(a, b)
+    assert merged.all_account_count() == 0
+    assert any(t.id == "a1" for t in merged.trash)
+
+
+def test_merge_restore_from_trash_wins_by_time() -> None:
+    # B удалил, затем A восстановил (позже) — запись снова активна.
+    a = Vault.empty()
+    s = Service(id="s1", name="Почта")
+    acc = Account(id="a1", title="X", login="u")
+    s.accounts.append(acc)
+    a.services = [s]
+
+    b = Vault.from_dict(a.to_dict())
+    b.trash_account(b.services[0], b.services[0].accounts[0])
+    b.trash[0].deleted_at = 1000.0
+
+    # A восстанавливает позже: обновляем location_at активной записи.
+    acc.location_at = 2000.0
+
+    merged = merge(a, b)
+    assert merged.all_account_count() == 1
+    assert merged.service("s1").account("a1") is not None
+    assert not any(t.id == "a1" for t in merged.trash)
+
+
+def test_location_at_roundtrips_and_migrates() -> None:
+    acc = Account(id="a1", title="X")
+    acc.location_at = 123.0
+    restored = Account.from_dict(acc.to_dict())
+    assert restored.location_at == 123.0
+    # Старый формат без поля читается как 0.0.
+    legacy = {"id": "a2", "title": "Y", "password": "p"}
+    assert Account.from_dict(legacy).location_at == 0.0
+
+
 def test_manager_unlock_flow() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE

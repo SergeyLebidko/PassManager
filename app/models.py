@@ -117,6 +117,7 @@ class Account:
     modified_at: float = field(default_factory=now)
     order: float = 0.0
     order_at: float = 0.0  # когда менялся порядок (для синхронизации)
+    location_at: float = 0.0  # когда запись меняла сервис (для синхронизации)
 
     def touch(self) -> None:
         self.modified_at = now()
@@ -190,6 +191,7 @@ class Account:
             "modified_at": self.modified_at,
             "order": self.order,
             "order_at": self.order_at,
+            "location_at": self.location_at,
         }
 
     @classmethod
@@ -210,6 +212,7 @@ class Account:
             modified_at=float(data.get("modified_at", now())),
             order=float(data.get("order", 0.0)),
             order_at=float(data.get("order_at", 0.0)),
+            location_at=float(data.get("location_at", 0.0)),
         )
 
 
@@ -242,6 +245,7 @@ class Service:
         """Добавляет учётную запись в начало списка."""
         account.order = _next_top_order(self.accounts)
         account.order_at = now()
+        account.location_at = now()
         self.accounts.append(account)
         _normalize_order(self.accounts)
 
@@ -372,6 +376,25 @@ class Vault:
             svc.order_at = stamp
         self.services = new_items
 
+    def move_account(self, account: Account, source: Service,
+                     target: Service) -> None:
+        """Переносит учётную запись из одного сервиса в другой.
+
+        Запись встаёт в начало целевого сервиса (ручное изменение порядка),
+        а факт переноса фиксируется в её журнале.
+        """
+        if source is target:
+            return
+        source.accounts = [a for a in source.accounts if a.id != account.id]
+        source.touch()
+        entry = account._snapshot("move", now())
+        entry.comment = f"{source.name} → {target.name}"
+        account.history.insert(0, entry)
+        account.location_at = now()
+        account.touch()
+        target.add_account_top(account)
+        target.touch()
+
     # ---- корзина -----------------------------------------------------
     def trash_service(self, service: Service) -> None:
         self.trash.append(TrashItem(
@@ -414,6 +437,7 @@ class Vault:
                     if existing.account(acc.id) is None:
                         acc.order = _next_bottom_order(existing.accounts)
                         acc.order_at = now()
+                        acc.location_at = now()
                         existing.accounts.append(acc)
                 _normalize_order(existing.accounts)
                 existing.touch()
@@ -444,6 +468,7 @@ class Vault:
             if svc.account(acc.id) is None:
                 acc.order = _next_bottom_order(svc.accounts)
                 acc.order_at = now()
+                acc.location_at = now()
                 svc.accounts.append(acc)
                 _normalize_order(svc.accounts)
             svc.touch()

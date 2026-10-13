@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from ..models import Account, HistoryEntry, Service, TrashItem, to_iso
 from . import style
 from .icons import make_icon
+from .widgets import RoundedComboBox
 
 
 # --------------------------------------------------------------------------
@@ -336,7 +337,8 @@ class AccountDialog(QDialog):
     """Создание и редактирование учётной записи."""
 
     def __init__(self, account: Account | None = None, service_name: str = "",
-                 parent=None) -> None:
+                 services: list[Service] | None = None,
+                 current_service_id: str = "", parent=None) -> None:
         super().__init__(parent)
         self.account = account
         self.is_new = account is None
@@ -350,6 +352,15 @@ class AccountDialog(QDialog):
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
+        self.service_box = RoundedComboBox()
+        for svc in services or []:
+            self.service_box.addItem(svc.name, svc.id)
+        if current_service_id:
+            index = self.service_box.findData(current_service_id)
+            if index >= 0:
+                self.service_box.setCurrentIndex(index)
+        self.service_box.setEnabled(self.service_box.count() > 0)
+
         self.title = QLineEdit(account.title if account else "")
         self.title.setPlaceholderText("Краткое название")
         self.login = CopyableField(account.login if account else "", masked=False)
@@ -358,6 +369,7 @@ class AccountDialog(QDialog):
         self.comment.setMinimumHeight(80)
         self.comment.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
+        form.addRow("Сервис:", self.service_box)
         form.addRow("Название: *", self.title)
         form.addRow("Логин: *", self.login)
         form.addRow("Пароль: *", self.password)
@@ -408,6 +420,7 @@ class AccountDialog(QDialog):
             "login": self.login.text().strip(),
             "password": self.password.text(),
             "comment": self.comment.toPlainText().strip(),
+            "service_id": self.service_box.currentData() or "",
         }
         self.accept()
 
@@ -486,7 +499,8 @@ class HistoryDialog(QDialog):
         self.table.insertRow(row)
 
         labels = {"login": "Логин", "password": "Пароль",
-                  "title": "Название", "comment": "Комментарий"}
+                  "title": "Название", "comment": "Комментарий",
+                  "move": "Перемещение"}
         kind = QTableWidgetItem(labels.get(entry.kind, "Пароль"))
         kind.setData(Qt.UserRole, entry)
         self.table.setItem(row, 0, kind)

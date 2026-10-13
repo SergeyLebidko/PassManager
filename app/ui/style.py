@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 ACCENT = "#2f6fed"
 ACCENT_HOVER = "#3a7cff"
 DANGER = "#d64545"
 DANGER_HOVER = "#e35656"
 SUCCESS = "#2e9e6b"
+
+# Абсолютные пути к SVG-стрелке выпадающих списков (нужны в QSS через url()).
+_ICONS_DIR = Path(__file__).resolve().parent / "assets" / "icons"
+_CHEVRON_LIGHT = (_ICONS_DIR / "chevron-down.svg").as_posix()
+_CHEVRON_DARK = (_ICONS_DIR / "chevron-down-dark.svg").as_posix()
 
 LIGHT_QSS = f"""
 * {{
@@ -37,6 +44,30 @@ QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox {{
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus {{
     border: 1px solid {ACCENT};
+}}
+QComboBox {{
+    padding-right: 30px;
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 26px;
+    border: none;
+    background: transparent;
+}}
+QComboBox::down-arrow {{
+    image: url("{_CHEVRON_LIGHT}");
+    width: 12px;
+    height: 12px;
+    margin-right: 9px;
+}}
+QComboBox QAbstractItemView {{
+    background: transparent;
+    border: none;
+    padding: 6px;
+    outline: none;
+    selection-background-color: #e6edfd;
+    selection-color: #12315f;
 }}
 QPushButton {{
     background: #ffffff;
@@ -245,6 +276,30 @@ QLineEdit, QPlainTextEdit, QTextEdit, QComboBox, QSpinBox {{
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QComboBox:focus {{
     border: 1px solid {ACCENT};
+}}
+QComboBox {{
+    padding-right: 30px;
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    width: 26px;
+    border: none;
+    background: transparent;
+}}
+QComboBox::down-arrow {{
+    image: url("{_CHEVRON_DARK}");
+    width: 12px;
+    height: 12px;
+    margin-right: 9px;
+}}
+QComboBox QAbstractItemView {{
+    background: transparent;
+    border: none;
+    padding: 6px;
+    outline: none;
+    selection-background-color: #33415e;
+    selection-color: #eaf0ff;
 }}
 QPushButton {{
     background: #2b3038;
@@ -458,3 +513,17 @@ def highlight_text_color() -> str:
 def accent_color() -> str:
     """Акцентный цвет (линия вставки при перетаскивании)."""
     return ACCENT
+
+
+def combo_popup_qss() -> str:
+    """Стиль всплывающего окна выпадающего списка.
+
+    Задаётся напрямую контейнеру попапа (см. ``RoundedComboBox``): глобальный
+    QSS не доходит до отдельного окна списка, а рамку со скруглением нужно
+    нарисовать именно там — иначе получается «рамка в рамке» без скругления.
+    """
+    if _current_dark:
+        return ("#comboPopup{background:#262a31;border:1px solid #363b44;"
+                "border-radius:10px;}")
+    return ("#comboPopup{background:#ffffff;border:1px solid #d7dae0;"
+            "border-radius:10px;}")
