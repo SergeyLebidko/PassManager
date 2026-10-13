@@ -53,6 +53,7 @@ def _merge_services(local: Vault, remote: Vault,
             services[svc.id] = Service(
                 id=svc.id,
                 name=svc.name,
+                icon=svc.icon,
                 created_at=svc.created_at,
                 modified_at=svc.modified_at,
                 order=svc.order,
@@ -61,6 +62,7 @@ def _merge_services(local: Vault, remote: Vault,
             continue
         if svc.modified_at > current.modified_at:
             current.name = svc.name
+            current.icon = svc.icon
             current.modified_at = svc.modified_at
         if svc.order_at >= current.order_at:
             current.order = svc.order

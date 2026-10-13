@@ -120,6 +120,20 @@ QPushButton#quiet:hover {{
     background: #e6edfd;
     border-radius: 6px;
 }}
+QToolButton {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 4px;
+}}
+QToolButton:hover {{
+    background: #eef1f6;
+    border-color: #d7dae0;
+}}
+QToolButton:checked {{
+    background: #e6edfd;
+    border-color: {ACCENT};
+}}
 QListWidget, QTreeWidget, QTableWidget {{
     background: #ffffff;
     border: 1px solid #e2e5ea;
@@ -351,6 +365,20 @@ QPushButton#quiet {{
 QPushButton#quiet:hover {{
     background: #2b3038;
     border-radius: 6px;
+}}
+QToolButton {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 4px;
+}}
+QToolButton:hover {{
+    background: #343a44;
+    border-color: #363b44;
+}}
+QToolButton:checked {{
+    background: #33415e;
+    border-color: {ACCENT};
 }}
 QListWidget, QTreeWidget, QTableWidget {{
     background: #262a31;
