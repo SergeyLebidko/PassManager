@@ -351,20 +351,20 @@ class AccountDialog(QDialog):
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         self.title = QLineEdit(account.title if account else "")
-        self.title.setPlaceholderText("Краткое название (необязательно)")
+        self.title.setPlaceholderText("Краткое название")
         self.login = CopyableField(account.login if account else "", masked=False)
         self.password = CopyableField(account.password if account else "", masked=True)
         self.comment = CommentEdit(account.comment if account else "")
         self.comment.setMinimumHeight(80)
         self.comment.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
 
-        form.addRow("Название:", self.title)
-        form.addRow("Логин:", self.login)
-        form.addRow("Пароль:", self.password)
+        form.addRow("Название: *", self.title)
+        form.addRow("Логин: *", self.login)
+        form.addRow("Пароль: *", self.password)
         form.addRow("Комментарий:", self.comment)
         layout.addLayout(form)
 
-        hint = QLabel(CLIPBOARD_HINT)
+        hint = QLabel("* — обязательные поля. " + CLIPBOARD_HINT)
         hint.setObjectName("subtitleLabel")
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -391,9 +391,17 @@ class AccountDialog(QDialog):
         layout.addWidget(buttons)
 
     def _accept(self) -> None:
-        if not self.login.text().strip() and not self.title.text().strip():
+        missing = []
+        if not self.title.text().strip():
+            missing.append("название")
+        if not self.login.text().strip():
+            missing.append("логин")
+        if not self.password.text():
+            missing.append("пароль")
+        if missing:
             notify(self, "Проверка",
-                   "Укажите хотя бы название или логин.", QMessageBox.Warning)
+                   "Заполните обязательные поля: " + ", ".join(missing) + ".",
+                   QMessageBox.Warning)
             return
         self.result_data = {
             "title": self.title.text().strip(),
