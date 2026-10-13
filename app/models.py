@@ -108,6 +108,7 @@ class Account:
     login: str = ""
     password: str = ""
     comment: str = ""
+    icon: str = ""  # имя иконки из пула ("" — без иконки)
     created_at: float = field(default_factory=now)
     password_changed_at: float = field(default_factory=now)
     login_changed_at: float = field(default_factory=now)
@@ -182,6 +183,7 @@ class Account:
             "login": self.login,
             "password": self.password,
             "comment": self.comment,
+            "icon": self.icon,
             "created_at": self.created_at,
             "password_changed_at": self.password_changed_at,
             "login_changed_at": self.login_changed_at,
@@ -203,6 +205,7 @@ class Account:
             login=data.get("login", ""),
             password=data.get("password", ""),
             comment=data.get("comment", ""),
+            icon=data.get("icon", ""),
             created_at=created,
             password_changed_at=float(data.get("password_changed_at", now())),
             login_changed_at=float(data.get("login_changed_at", created)),
@@ -220,6 +223,7 @@ class Account:
 class Service:
     id: str = field(default_factory=new_id)
     name: str = ""
+    icon: str = ""  # имя иконки из пула ("" — без иконки)
     created_at: float = field(default_factory=now)
     accounts: list[Account] = field(default_factory=list)
     modified_at: float = field(default_factory=now)
@@ -259,6 +263,7 @@ class Service:
         return {
             "id": self.id,
             "name": self.name,
+            "icon": self.icon,
             "created_at": self.created_at,
             "accounts": [a.to_dict() for a in self.accounts],
             "modified_at": self.modified_at,
@@ -271,6 +276,7 @@ class Service:
         return cls(
             id=data.get("id") or new_id(),
             name=data.get("name", ""),
+            icon=data.get("icon", ""),
             created_at=float(data.get("created_at", now())),
             accounts=[Account.from_dict(a) for a in data.get("accounts", [])],
             modified_at=float(data.get("modified_at", now())),

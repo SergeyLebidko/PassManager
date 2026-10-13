@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -20,13 +22,14 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ..models import Account, HistoryEntry, Service, TrashItem, to_iso
 from . import style
-from .icons import make_icon
+from .icons import ICON_POOL, make_icon
 from .widgets import RoundedComboBox
 
 
@@ -293,6 +296,93 @@ class MasterPasswordDialog(QDialog):
 
 
 # --------------------------------------------------------------------------
+# Выбор иконки
+# --------------------------------------------------------------------------
+
+class IconPickerDialog(QDialog):
+    """Сетка иконок из пула для выбора иконки сервиса/учётной записи.
+
+    Выбор применяется сразу по клику (отдельного «ОК» нет). Пункт
+    «Без иконки» очищает ранее установленную иконку.
+    """
+
+    COLUMNS = 8
+
+    def __init__(self, current: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Выбор иконки")
+        self.selected = current or ""
+
+        layout = QVBoxLayout(self)
+        title = QLabel("Выберите иконку")
+        title.setObjectName("titleLabel")
+        layout.addWidget(title)
+
+        grid = QGridLayout()
+        grid.setSpacing(6)
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+        for index, name in enumerate(ICON_POOL):
+            btn = QToolButton()
+            btn.setCheckable(True)
+            btn.setAutoRaise(True)
+            btn.setFixedSize(46, 46)
+            btn.setIconSize(QSize(22, 22))
+            btn.setIcon(make_icon(name, style.icon_color()))
+            btn.setToolTip(name)
+            btn.setChecked(name == self.selected)
+            btn.clicked.connect(lambda _c=False, n=name: self._choose(n))
+            self._group.addButton(btn)
+            grid.addWidget(btn, index // self.COLUMNS, index % self.COLUMNS)
+        layout.addLayout(grid)
+        grid.setColumnStretch(self.COLUMNS, 1)
+
+        buttons = QDialogButtonBox()
+        none_btn = buttons.addButton("Без иконки", QDialogButtonBox.ResetRole)
+        none_btn.clicked.connect(lambda: self._choose(""))
+        cancel = buttons.addButton("Отмена", QDialogButtonBox.RejectRole)
+        cancel.clicked.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _choose(self, name: str) -> None:
+        self.selected = name
+        self.accept()
+
+
+class IconPickerButton(QPushButton):
+    """Кнопка-превью иконки; по клику открывает :class:`IconPickerDialog`."""
+
+    def __init__(self, icon_name: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self._icon_name = icon_name or ""
+        self.setFixedSize(40, 32)
+        self.setIconSize(QSize(20, 20))
+        self.setToolTip("Выбрать иконку")
+        self.clicked.connect(self._choose)
+        self._refresh()
+
+    def icon_name(self) -> str:
+        return self._icon_name
+
+    def set_icon_name(self, name: str) -> None:
+        self._icon_name = name or ""
+        self._refresh()
+
+    def _refresh(self) -> None:
+        if self._icon_name:
+            self.setIcon(make_icon(self._icon_name, style.icon_color()))
+            self.setText("")
+        else:
+            self.setIcon(QIcon())
+            self.setText("—")
+
+    def _choose(self) -> None:
+        dlg = IconPickerDialog(self._icon_name, parent=self)
+        if dlg.exec():
+            self.set_icon_name(dlg.selected)
+
+
+# --------------------------------------------------------------------------
 # Сервис
 # --------------------------------------------------------------------------
 
@@ -305,7 +395,9 @@ class ServiceDialog(QDialog):
         form = QFormLayout()
         self.name = QLineEdit(service.name if service else "")
         self.name.setPlaceholderText("Например: Почта, Банки, Игры...")
+        self.icon_btn = IconPickerButton(service.icon if service else "")
         form.addRow("Название:", self.name)
+        form.addRow("Иконка:", self.icon_btn)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Сохранить")
@@ -327,6 +419,9 @@ class ServiceDialog(QDialog):
 
     def value(self) -> str:
         return self.name.text().strip()
+
+    def icon_value(self) -> str:
+        return self.icon_btn.icon_name()
 
 
 # --------------------------------------------------------------------------
@@ -368,8 +463,10 @@ class AccountDialog(QDialog):
         self.comment = CommentEdit(account.comment if account else "")
         self.comment.setMinimumHeight(80)
         self.comment.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        self.icon_btn = IconPickerButton(account.icon if account else "")
 
         form.addRow("Сервис:", self.service_box)
+        form.addRow("Иконка:", self.icon_btn)
         form.addRow("Название: *", self.title)
         form.addRow("Логин: *", self.login)
         form.addRow("Пароль: *", self.password)
@@ -420,6 +517,7 @@ class AccountDialog(QDialog):
             "login": self.login.text().strip(),
             "password": self.password.text(),
             "comment": self.comment.toPlainText().strip(),
+            "icon": self.icon_btn.icon_name(),
             "service_id": self.service_box.currentData() or "",
         }
         self.accept()

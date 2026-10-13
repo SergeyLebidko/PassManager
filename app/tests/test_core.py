@@ -566,6 +566,76 @@ def test_location_at_roundtrips_and_migrates() -> None:
     assert Account.from_dict(legacy).location_at == 0.0
 
 
+def test_account_icon_roundtrips_and_defaults_empty() -> None:
+    acc = Account(id="a1", title="X", icon="mail")
+    restored = Account.from_dict(acc.to_dict())
+    assert restored.icon == "mail"
+    # Иконка не обязательна: по умолчанию пусто, старый файл читается.
+    assert Account.from_dict({"id": "a2", "title": "Y"}).icon == ""
+
+
+def test_service_icon_roundtrips_and_defaults_empty() -> None:
+    svc = Service(id="s1", name="Почта", icon="wallet")
+    restored = Service.from_dict(svc.to_dict())
+    assert restored.icon == "wallet"
+    assert Service.from_dict({"id": "s2", "name": "Банк"}).icon == ""
+
+
+def test_icon_change_does_not_add_history() -> None:
+    acc = Account(id="a1", title="X", login="u", password="p")
+    before = list(acc.history)
+    # Смена иконки — не событие журнала.
+    acc.icon = "star"
+    acc.touch()
+    assert acc.history == before
+
+
+def test_merge_takes_service_icon_from_newer() -> None:
+    a = Vault.empty()
+    a.services = [Service(id="s1", name="Почта", icon="mail")]
+    a.services[0].modified_at = 100.0
+
+    b = Vault.empty()
+    b.services = [Service(id="s1", name="Почта", icon="globe")]
+    b.services[0].modified_at = 200.0
+
+    merged = merge(a, b)
+    assert merged.service("s1").icon == "globe"
+    # Симметрично.
+    assert merge(b, a).service("s1").icon == "globe"
+
+
+def test_merge_takes_account_icon_from_newer() -> None:
+    a = Vault.empty()
+    s = Service(id="s1", name="Почта")
+    acc = Account(id="a1", title="X", login="u", password="p", icon="mail")
+    acc.modified_at = 100.0
+    s.accounts.append(acc)
+    a.services = [s]
+
+    b = Vault.from_dict(a.to_dict())
+    b.services[0].accounts[0].icon = "star"
+    b.services[0].accounts[0].modified_at = 200.0
+
+    merged = merge(a, b)
+    assert merged.service("s1").account("a1").icon == "star"
+
+
+def test_icon_survives_trash_and_restore() -> None:
+    vault = Vault.empty()
+    svc = Service(id="s1", name="Почта")
+    acc = Account(id="a1", title="X", login="u", password="p", icon="rocket")
+    svc.accounts.append(acc)
+    vault.services = [svc]
+
+    vault.trash_account(svc, acc)
+    # В корзине иконка сохранена в payload.
+    assert vault.trash[0].payload["account"]["icon"] == "rocket"
+
+    vault.restore(vault.trash[0])
+    assert vault.service("s1").account("a1").icon == "rocket"
+
+
 def test_manager_unlock_flow() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE

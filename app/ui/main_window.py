@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QLibraryInfo, QTimer, Qt, QTranslator
+from PySide6.QtCore import QLibraryInfo, QSize, QTimer, Qt, QTranslator
 from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -133,6 +133,7 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(search)
 
         self.service_list = ReorderListWidget()
+        self.service_list.setIconSize(QSize(18, 18))
         self.service_list.currentItemChanged.connect(self._on_service_selected)
         self.service_list.itemDoubleClicked.connect(lambda _i: self.edit_service())
         self.service_list.rowReorderRequested.connect(self._on_services_reordered)
@@ -176,6 +177,7 @@ class MainWindow(QMainWindow):
         self.accounts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.accounts_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.accounts_table.setAlternatingRowColors(True)
+        self.accounts_table.setIconSize(QSize(18, 18))
         self.accounts_table.doubleClicked.connect(lambda _i: self.edit_account())
         self.accounts_table.rowReorderRequested.connect(self._on_accounts_reordered)
         header_view = self.accounts_table.horizontalHeader()
@@ -263,8 +265,8 @@ class MainWindow(QMainWindow):
         self.theme_btn.setToolTip("Включить светлую тему" if self.dark
                                   else "Включить тёмную тему")
         self._recolor_icons()
-        # Пересчитываем подсветку поиска под новые цвета темы.
-        self._filter_services(self.search.text())
+        # Пересчитываем подсветку поиска и иконки под новые цвета темы.
+        self.refresh_services(select_id=self._selected_service_id())
         # Высоту верхних строк считаем только после применения стилей,
         # иначе sizeHint поля поиска занижен (padding ещё не учтён).
         QTimer.singleShot(0, self._align_headers)
@@ -298,10 +300,13 @@ class MainWindow(QMainWindow):
 
         self.service_list.blockSignals(True)
         self.service_list.clear()
+        color = style.icon_color()
         for svc in self.manager.vault.services:
             count = len(svc.accounts)
             it = QListWidgetItem(f"{svc.name}  ({count})")
             it.setData(Qt.UserRole, svc.id)
+            if svc.icon:
+                it.setIcon(make_icon(svc.icon, color))
             self.service_list.addItem(it)
         self.service_list.blockSignals(False)
 
@@ -421,6 +426,8 @@ class MainWindow(QMainWindow):
             self.accounts_table.insertRow(row)
             title = QTableWidgetItem(acc.title)
             title.setData(Qt.UserRole, acc.id)
+            if acc.icon:
+                title.setIcon(make_icon(acc.icon, style.icon_color()))
             self.accounts_table.setItem(row, 0, title)
             self.accounts_table.setItem(row, 1, QTableWidgetItem(acc.login))
             self.accounts_table.setItem(row, 2, QTableWidgetItem("•" * min(len(acc.password), 12) or "—"))
@@ -491,7 +498,7 @@ class MainWindow(QMainWindow):
     def add_service(self) -> None:
         dlg = ServiceDialog(parent=self)
         if dlg.exec():
-            service = Service(name=dlg.value())
+            service = Service(name=dlg.value(), icon=dlg.icon_value())
             self.manager.vault.add_service(service)
             self._persist()
             self.refresh_services(select_id=service.id)
@@ -504,10 +511,11 @@ class MainWindow(QMainWindow):
         dlg = ServiceDialog(service, parent=self)
         if dlg.exec():
             service.name = dlg.value()
+            service.icon = dlg.icon_value()
             service.touch()
             self._persist()
             self.refresh_services(select_id=service.id)
-            self.set_status("Сервис переименован.")
+            self.set_status("Сервис сохранён.")
 
     def delete_service(self) -> None:
         service = self.current_service()
@@ -539,7 +547,8 @@ class MainWindow(QMainWindow):
             target = (self.manager.vault.service(data["service_id"])
                       or service)
             acc = Account(title=data["title"], login=data["login"],
-                          password=data["password"], comment=data["comment"])
+                          password=data["password"], comment=data["comment"],
+                          icon=data.get("icon", ""))
             target.add_account_top(acc)
             target.touch()
             self._persist()
@@ -563,6 +572,12 @@ class MainWindow(QMainWindow):
             account.change_login(data["login"])
             account.change_password(data["password"])
             account.change_comment(data["comment"])
+            # Иконка — не поле журнала, но её изменение синхронизируется,
+            # поэтому просто обновляем и поднимаем modified_at.
+            new_icon = data.get("icon", "")
+            if new_icon != account.icon:
+                account.icon = new_icon
+                account.touch()
             target = self.manager.vault.service(data["service_id"])
             if target is not None and target is not service:
                 # Перенос в другой сервис — своя запись истории, порядок
