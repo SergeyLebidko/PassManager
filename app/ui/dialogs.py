@@ -426,16 +426,6 @@ class HistoryDialog(QDialog):
         self._reveal = False
         layout = QVBoxLayout(self)
 
-        current = QLabel(
-            f"Название изменено: {to_iso(account.title_changed_at)}   •   "
-            f"Логин изменён: {to_iso(account.login_changed_at)}   •   "
-            f"Пароль изменён: {to_iso(account.password_changed_at)}   •   "
-            f"Комментарий изменён: {to_iso(account.comment_changed_at)}"
-        )
-        current.setObjectName("subtitleLabel")
-        current.setWordWrap(True)
-        layout.addWidget(current)
-
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
             ["Изменено", "Название", "Логин", "Пароль", "Дата смены",
