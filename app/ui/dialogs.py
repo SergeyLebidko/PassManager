@@ -304,7 +304,7 @@ class ServiceDialog(QDialog):
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.name = QLineEdit(service.name if service else "")
-        self.name.setPlaceholderText("Например: Gmail, Банк, Steam")
+        self.name.setPlaceholderText("Например: Почта, Банки, Игры...")
         form.addRow("Название:", self.name)
         layout.addLayout(form)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -641,12 +641,6 @@ class SettingsDialog(QDialog):
         self.log_view.clear()
         self.log_view.show()
         self.progress.show()
-        self._fit_to_content()
-
-    def _fit_to_content(self) -> None:
-        """Пересчитывает размер окна, чтобы лог и кнопки не перекрывались."""
-        self.layout().activate()
-        self.adjustSize()
 
     def append_log(self, text: str) -> None:
         self.log_view.appendPlainText(text)
@@ -657,7 +651,6 @@ class SettingsDialog(QDialog):
         self.test_btn.setEnabled(True)
         self.status.setText(("✓ " if ok else "✗ ") + message)
         self.status.setStyleSheet("color:#2e9e6b;" if ok else "color:#d64545;")
-        self._fit_to_content()
 
     def values(self) -> dict:
         return {
