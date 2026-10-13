@@ -38,6 +38,9 @@ _FILES: dict[str, str] = {
     "eye-off": "eye-off.svg",
     "plug": "plug.svg",
     "check": "check.svg",
+    "arrow-up": "arrow-up.svg",
+    "arrow-down": "arrow-down.svg",
+    "arrow-up-down": "arrow-up-down.svg",
 }
 
 # Кэши: отрендеренные иконки и загруженные рендереры.

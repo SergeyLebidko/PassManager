@@ -37,9 +37,20 @@ def _merge_accounts(local: list[Account], remote: list[Account],
         if acc.id in tombs:
             continue
         current = by_id.get(acc.id)
-        if current is None or acc.modified_at > current.modified_at:
+        if current is None:
             by_id[acc.id] = acc
-    return list(by_id.values())
+            continue
+        # Содержимое берём по ``modified_at``, а порядок — по ``order_at``.
+        # Метки независимы, поэтому правка на одном устройстве и сортировка
+        # на другом не затирают друг друга.
+        winner = acc if acc.modified_at > current.modified_at else current
+        order_src = acc if acc.order_at >= current.order_at else current
+        winner.order = order_src.order
+        winner.order_at = max(acc.order_at, current.order_at)
+        by_id[acc.id] = winner
+    result = list(by_id.values())
+    result.sort(key=lambda a: (a.order, a.id))
+    return result
 
 
 def merge(local: Vault, remote: Vault) -> Vault:
@@ -54,9 +65,13 @@ def merge(local: Vault, remote: Vault) -> Vault:
         if current is None:
             services_by_id[svc.id] = svc
             continue
-        # Берём более новую версию сервиса, но аккаунты сливаем попарно.
+        # Берём более новую версию сервиса (по содержимому), аккаунты сливаем
+        # попарно, а порядок выбираем по ``order_at``.
         newer, older = (svc, current) if svc.modified_at > current.modified_at else (current, svc)
         newer.accounts = _merge_accounts(newer.accounts, older.accounts, tombs)
+        order_src = svc if svc.order_at >= current.order_at else current
+        newer.order = order_src.order
+        newer.order_at = max(svc.order_at, current.order_at)
         services_by_id[svc.id] = newer
 
     trash_by_id: dict[str, TrashItem] = {}
@@ -74,14 +89,15 @@ def merge(local: Vault, remote: Vault) -> Vault:
             if prev is None or ts.deleted_at > prev.deleted_at:
                 tombstones[ts.id] = ts
 
-    merged = Vault(
+    services = list(services_by_id.values())
+    services.sort(key=lambda s: (s.order, s.id))
+
+    return Vault(
         version=max(local.version, remote.version),
-        services=list(services_by_id.values()),
+        services=services,
         trash=list(trash_by_id.values()),
         tombstones=list(tombstones.values()),
     )
-    merged.services.sort(key=lambda s: s.name.lower())
-    return merged
 
 
 def is_same_content(a: Vault, b: Vault) -> bool:

@@ -44,6 +44,32 @@ def to_date(ts: float | None) -> str:
     return time.strftime("%d.%m.%Y", time.localtime(ts))
 
 
+def _normalize_order(items: list) -> None:
+    """Стабильно сортирует объекты по ``order`` и делает позиции плотными.
+
+    В старых файлах поле ``order`` отсутствует — тогда у всех элементов
+    одинаковый ноль, и стабильная сортировка сохраняет прежний порядок из
+    файла. После этого позиции становятся уникальными (0..n-1).
+    """
+    items.sort(key=lambda obj: obj.order)
+    for index, obj in enumerate(items):
+        obj.order = float(index)
+
+
+def _next_top_order(items: list) -> float:
+    """Позиция для нового элемента — выше всех существующих."""
+    if not items:
+        return 0.0
+    return min(item.order for item in items) - 1.0
+
+
+def _next_bottom_order(items: list) -> float:
+    """Позиция для элемента в конце списка."""
+    if not items:
+        return 0.0
+    return max(item.order for item in items) + 1.0
+
+
 @dataclass
 class HistoryEntry:
     title: str = ""
@@ -89,6 +115,8 @@ class Account:
     comment_changed_at: float = field(default_factory=now)
     history: list[HistoryEntry] = field(default_factory=list)
     modified_at: float = field(default_factory=now)
+    order: float = 0.0
+    order_at: float = 0.0  # когда менялся порядок (для синхронизации)
 
     def touch(self) -> None:
         self.modified_at = now()
@@ -160,6 +188,8 @@ class Account:
             "comment_changed_at": self.comment_changed_at,
             "history": [h.to_dict() for h in self.history],
             "modified_at": self.modified_at,
+            "order": self.order,
+            "order_at": self.order_at,
         }
 
     @classmethod
@@ -178,6 +208,8 @@ class Account:
             comment_changed_at=float(data.get("comment_changed_at", created)),
             history=[HistoryEntry.from_dict(h) for h in data.get("history", [])],
             modified_at=float(data.get("modified_at", now())),
+            order=float(data.get("order", 0.0)),
+            order_at=float(data.get("order_at", 0.0)),
         )
 
 
@@ -188,9 +220,30 @@ class Service:
     created_at: float = field(default_factory=now)
     accounts: list[Account] = field(default_factory=list)
     modified_at: float = field(default_factory=now)
+    order: float = 0.0
+    order_at: float = 0.0  # когда менялся порядок (для синхронизации)
 
     def touch(self) -> None:
         self.modified_at = now()
+
+    def reorder(self, ordered_ids: list[str]) -> None:
+        """Расставляет учётные записи в заданном порядке (drag & drop/сортировка)."""
+        by_id = {acc.id: acc for acc in self.accounts}
+        new_items = [by_id[i] for i in ordered_ids if i in by_id]
+        # Записи, которых не было в списке, сохраняем в конце.
+        new_items += [acc for acc in self.accounts if acc.id not in set(ordered_ids)]
+        stamp = now()
+        for index, acc in enumerate(new_items):
+            acc.order = float(index)
+            acc.order_at = stamp
+        self.accounts = new_items
+
+    def add_account_top(self, account: Account) -> None:
+        """Добавляет учётную запись в начало списка."""
+        account.order = _next_top_order(self.accounts)
+        account.order_at = now()
+        self.accounts.append(account)
+        _normalize_order(self.accounts)
 
     def account(self, account_id: str) -> Account | None:
         for acc in self.accounts:
@@ -205,6 +258,8 @@ class Service:
             "created_at": self.created_at,
             "accounts": [a.to_dict() for a in self.accounts],
             "modified_at": self.modified_at,
+            "order": self.order,
+            "order_at": self.order_at,
         }
 
     @classmethod
@@ -215,6 +270,8 @@ class Service:
             created_at=float(data.get("created_at", now())),
             accounts=[Account.from_dict(a) for a in data.get("accounts", [])],
             modified_at=float(data.get("modified_at", now())),
+            order=float(data.get("order", 0.0)),
+            order_at=float(data.get("order_at", 0.0)),
         )
 
 
@@ -296,6 +353,25 @@ class Vault:
     def all_account_count(self) -> int:
         return sum(len(s.accounts) for s in self.services)
 
+    # ---- порядок -----------------------------------------------------
+    def add_service(self, service: Service) -> None:
+        """Добавляет сервис в начало списка."""
+        service.order = _next_top_order(self.services)
+        service.order_at = now()
+        self.services.append(service)
+        _normalize_order(self.services)
+
+    def reorder_services(self, ordered_ids: list[str]) -> None:
+        """Расставляет сервисы в заданном порядке (drag & drop/сортировка)."""
+        by_id = {svc.id: svc for svc in self.services}
+        new_items = [by_id[i] for i in ordered_ids if i in by_id]
+        new_items += [s for s in self.services if s.id not in set(ordered_ids)]
+        stamp = now()
+        for index, svc in enumerate(new_items):
+            svc.order = float(index)
+            svc.order_at = stamp
+        self.services = new_items
+
     # ---- корзина -----------------------------------------------------
     def trash_service(self, service: Service) -> None:
         self.trash.append(TrashItem(
@@ -328,12 +404,18 @@ class Vault:
             svc = Service.from_dict(item.payload)
             existing = self.service(svc.id)
             if existing is None:
+                svc.order = _next_bottom_order(self.services)
+                svc.order_at = now()
                 self.services.append(svc)
+                _normalize_order(self.services)
             else:
                 # Сервис уже есть — переносим отсутствующие учётные записи.
                 for acc in svc.accounts:
                     if existing.account(acc.id) is None:
+                        acc.order = _next_bottom_order(existing.accounts)
+                        acc.order_at = now()
                         existing.accounts.append(acc)
+                _normalize_order(existing.accounts)
                 existing.touch()
         else:
             data = item.payload
@@ -345,16 +427,25 @@ class Vault:
                 trashed = self._trashed_service(service_id)
                 if trashed is not None:
                     svc = Service.from_dict(trashed.payload)
+                    svc.order = _next_bottom_order(self.services)
+                    svc.order_at = now()
                     self.services.append(svc)
+                    _normalize_order(self.services)
                     self.trash = [t for t in self.trash if t.id != trashed.id]
                 else:
                     svc = Service(id=service_id or new_id(),
                                   name=data.get("service_name",
                                                 "Восстановленный сервис"))
+                    svc.order = _next_bottom_order(self.services)
+                    svc.order_at = now()
                     self.services.append(svc)
+                    _normalize_order(self.services)
             acc = Account.from_dict(data["account"])
             if svc.account(acc.id) is None:
+                acc.order = _next_bottom_order(svc.accounts)
+                acc.order_at = now()
                 svc.accounts.append(acc)
+                _normalize_order(svc.accounts)
             svc.touch()
         self.trash = [t for t in self.trash if t.id != item.id]
 
@@ -381,9 +472,13 @@ class Vault:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Vault":
+        services = [Service.from_dict(s) for s in data.get("services", [])]
+        _normalize_order(services)
+        for service in services:
+            _normalize_order(service.accounts)
         return cls(
             version=int(data.get("version", 1)),
-            services=[Service.from_dict(s) for s in data.get("services", [])],
+            services=services,
             trash=[TrashItem.from_dict(t) for t in data.get("trash", [])],
             tombstones=[Tombstone.from_dict(t) for t in data.get("tombstones", [])],
         )
