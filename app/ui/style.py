@@ -520,21 +520,3 @@ def icon_hover_color() -> str:
     """Фон ячейки иконки при наведении (в сетке выбора иконок)."""
     return "#343a44" if _current_dark else "#eef1f6"
 
-
-def accent_color() -> str:
-    """Акцентный цвет (линия вставки при перетаскивании)."""
-    return ACCENT
-
-
-def combo_popup_qss() -> str:
-    """Стиль всплывающего окна выпадающего списка.
-
-    Задаётся напрямую контейнеру попапа (см. ``RoundedComboBox``): глобальный
-    QSS не доходит до отдельного окна списка, а рамку со скруглением нужно
-    нарисовать именно там — иначе получается «рамка в рамке» без скругления.
-    """
-    if _current_dark:
-        return ("#comboPopup{background:#262a31;border:1px solid #363b44;"
-                "border-radius:10px;}")
-    return ("#comboPopup{background:#ffffff;border:1px solid #d7dae0;"
-            "border-radius:10px;}")

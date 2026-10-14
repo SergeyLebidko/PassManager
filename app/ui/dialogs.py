@@ -27,10 +27,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..models import Account, HistoryEntry, Service, TrashItem, to_iso
+from ..models import Account, HistoryEntry, Service, to_iso
 from . import style
 from .icons import ICON_POOL, make_cell_icon, make_icon
-from .widgets import RoundedComboBox
 
 
 # --------------------------------------------------------------------------
@@ -67,23 +66,6 @@ def notify(parent, title: str, text: str, icon=QMessageBox.Information) -> None:
     ok = box.addButton("ОК", QMessageBox.AcceptRole)
     box.setDefaultButton(ok)
     box.exec()
-
-
-def icon_button(icon_name: str, tooltip: str,
-                obj_name: str = "", color: str = ""):
-    """Компактная кнопка-иконка с всплывающей подсказкой.
-
-    Для цветных ролей (``primary``/``danger``) иконка белеет только при
-    наведении; в покое — нейтрального цвета темы. Явный ``color``
-    используется для иконок на постоянно цветном фоне.
-    """
-    from .widgets import IconColorButton
-
-    accent = obj_name in ("primary", "danger")
-    btn = IconColorButton(icon_name, tooltip, obj_name, accent=accent)
-    if color:
-        btn.setIcon(make_icon(icon_name, color))
-    return btn
 
 
 def text_icon_button(icon_name: str, text: str,
@@ -464,8 +446,7 @@ class AccountDialog(QDialog):
     """Создание и редактирование учётной записи."""
 
     def __init__(self, account: Account | None = None, service_name: str = "",
-                 services: list[Service] | None = None,
-                 current_service_id: str = "", parent=None) -> None:
+                 parent=None) -> None:
         super().__init__(parent)
         self.account = account
         self.is_new = account is None
@@ -479,15 +460,6 @@ class AccountDialog(QDialog):
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
-        self.service_box = RoundedComboBox()
-        for svc in services or []:
-            self.service_box.addItem(svc.name, svc.id)
-        if current_service_id:
-            index = self.service_box.findData(current_service_id)
-            if index >= 0:
-                self.service_box.setCurrentIndex(index)
-        self.service_box.setEnabled(self.service_box.count() > 0)
-
         self.title = QLineEdit(account.title if account else "")
         self.title.setPlaceholderText("Краткое название")
         self.login = CopyableField(account.login if account else "", masked=False)
@@ -497,7 +469,6 @@ class AccountDialog(QDialog):
         self.comment.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         self.icon_btn = IconPickerButton(account.icon if account else "")
 
-        form.addRow("Сервис:", self.service_box)
         form.addRow("Иконка:", self.icon_btn)
         form.addRow("Название: *", self.title)
         form.addRow("Логин: *", self.login)
@@ -550,7 +521,6 @@ class AccountDialog(QDialog):
             "password": self.password.text(),
             "comment": self.comment.toPlainText().strip(),
             "icon": self.icon_btn.icon_name(),
-            "service_id": self.service_box.currentData() or "",
         }
         self.accept()
 
@@ -831,85 +801,3 @@ class SettingsDialog(QDialog):
         self.stop_check_worker()
         super().closeEvent(event)
 
-
-# --------------------------------------------------------------------------
-# Корзина
-# --------------------------------------------------------------------------
-
-class TrashDialog(QDialog):
-    def __init__(self, items: list[TrashItem], parent=None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Корзина")
-        self.resize(680, 460)
-        self.items = items
-        self.action: str | None = None
-        self.selected_id: str | None = None
-
-        layout = QVBoxLayout(self)
-        title = QLabel("Корзина")
-        title.setObjectName("titleLabel")
-        layout.addWidget(title)
-        hint = QLabel("Удалённые сервисы и учётные записи хранятся здесь без ограничения по времени.")
-        hint.setObjectName("subtitleLabel")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Тип", "Название", "Удалено"])
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.setAlternatingRowColors(True)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.setStretchLastSection(False)
-        header.setMinimumSectionSize(60)
-        header.setSectionsMovable(True)
-        header.resizeSection(0, 150)
-        header.resizeSection(1, 300)
-        self.table.setColumnWidth(2, 180)
-
-        for item in items:
-            kind = "Сервис" if item.kind == "service" else "Учётная запись"
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            kind_item = QTableWidgetItem(kind)
-            kind_item.setData(Qt.UserRole, item.id)
-            self.table.setItem(row, 0, kind_item)
-            self.table.setItem(row, 1, QTableWidgetItem(item.name))
-            self.table.setItem(row, 2, QTableWidgetItem(to_iso(item.deleted_at)))
-        self.table.doubleClicked.connect(lambda _i: self._select("restore"))
-        layout.addWidget(self.table)
-
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        self.restore_btn = icon_button(
-            "restore", "Восстановить выбранный элемент", "primary")
-        self.delete_btn = icon_button(
-            "trash", "Удалить выбранный элемент навсегда", "danger")
-        self.clear_btn = icon_button(
-            "clear", "Очистить корзину полностью", "danger")
-        row.addWidget(self.restore_btn)
-        row.addWidget(self.delete_btn)
-        row.addStretch(1)
-        row.addWidget(self.clear_btn)
-        layout.addLayout(row)
-
-        self.restore_btn.clicked.connect(lambda: self._select("restore"))
-        self.delete_btn.clicked.connect(lambda: self._select("delete"))
-        self.clear_btn.clicked.connect(lambda: self._select("clear"))
-
-    def _select(self, action: str) -> None:
-        if action in ("restore", "delete"):
-            row = self.table.currentRow()
-            if row < 0:
-                notify(self, "Корзина", "Выберите элемент.")
-                return
-            item = self.table.item(row, 0)
-            self.selected_id = item.data(Qt.UserRole) if item is not None else None
-        if action == "clear" and not self.items:
-            notify(self, "Корзина", "Корзина уже пуста.")
-            return
-        self.action = action
-        self.accept()

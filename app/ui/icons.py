@@ -23,8 +23,6 @@ _FILES: dict[str, str] = {
     "add": "add.svg",
     "edit": "edit.svg",
     "trash": "trash.svg",
-    "restore": "restore.svg",
-    "clear": "clear.svg",
     "close": "x.svg",
     "person": "person.svg",
     "key": "key.svg",

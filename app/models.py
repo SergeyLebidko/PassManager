@@ -2,8 +2,7 @@
 
 Иерархия:
     Vault
-      ├─ services: list[Service]
-      └─ trash:    list[TrashItem]
+      └─ services: list[Service]
 
     Service
       └─ accounts: list[Account]
@@ -14,6 +13,10 @@
 Каждый объект имеет уникальный ``id`` и метку ``modified_at`` (UNIX-время,
 секунды, float). Метка используется при синхронизации: при конфликте
 побеждает версия с более новым ``modified_at``.
+
+Удаление необратимо: объект убирается из хранилища, а в ``tombstones``
+остаётся метка, чтобы удалённое не «воскресало» при синхронизации с копией,
+где оно ещё присутствует.
 """
 
 from __future__ import annotations
@@ -90,7 +93,6 @@ class Account:
     comment_changed_at: float = field(default_factory=now)
     history: list[HistoryEntry] = field(default_factory=list)
     modified_at: float = field(default_factory=now)
-    location_at: float = 0.0  # когда запись меняла сервис (для синхронизации)
 
     def touch(self) -> None:
         self.modified_at = now()
@@ -163,7 +165,6 @@ class Account:
             "comment_changed_at": self.comment_changed_at,
             "history": [h.to_dict() for h in self.history],
             "modified_at": self.modified_at,
-            "location_at": self.location_at,
         }
 
     @classmethod
@@ -183,7 +184,6 @@ class Account:
             comment_changed_at=float(data.get("comment_changed_at", created)),
             history=[HistoryEntry.from_dict(h) for h in data.get("history", [])],
             modified_at=float(data.get("modified_at", now())),
-            location_at=float(data.get("location_at", 0.0)),
         )
 
 
@@ -195,14 +195,12 @@ class Service:
     created_at: float = field(default_factory=now)
     accounts: list[Account] = field(default_factory=list)
     modified_at: float = field(default_factory=now)
-    location_at: float = 0.0  # когда сервис появлялся/восстанавливался активным
 
     def touch(self) -> None:
         self.modified_at = now()
 
     def add_account(self, account: Account) -> None:
         """Добавляет учётную запись в сервис."""
-        account.location_at = now()
         self.accounts.append(account)
 
     def account(self, account_id: str) -> Account | None:
@@ -219,7 +217,6 @@ class Service:
             "created_at": self.created_at,
             "accounts": [a.to_dict() for a in self.accounts],
             "modified_at": self.modified_at,
-            "location_at": self.location_at,
         }
 
     @classmethod
@@ -230,43 +227,6 @@ class Service:
             icon=data.get("icon", ""),
             created_at=float(data.get("created_at", now())),
             accounts=[Account.from_dict(a) for a in data.get("accounts", [])],
-            modified_at=float(data.get("modified_at", now())),
-            location_at=float(data.get("location_at", 0.0)),
-        )
-
-
-@dataclass
-class TrashItem:
-    """Удалённый объект, хранящийся в корзине неограниченно долго.
-
-    ``payload`` - сериализованное представление удалённого ``Service``
-    или ``Account``.
-    """
-    id: str
-    kind: str  # "service" | "account"
-    name: str
-    payload: dict[str, Any]
-    deleted_at: float = field(default_factory=now)
-    modified_at: float = field(default_factory=now)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "kind": self.kind,
-            "name": self.name,
-            "payload": self.payload,
-            "deleted_at": self.deleted_at,
-            "modified_at": self.modified_at,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "TrashItem":
-        return cls(
-            id=data.get("id") or new_id(),
-            kind=data.get("kind", "account"),
-            name=data.get("name", ""),
-            payload=data.get("payload", {}),
-            deleted_at=float(data.get("deleted_at", now())),
             modified_at=float(data.get("modified_at", now())),
         )
 
@@ -293,7 +253,6 @@ class Tombstone:
 class Vault:
     version: int = 1
     services: list[Service] = field(default_factory=list)
-    trash: list[TrashItem] = field(default_factory=list)
     tombstones: list[Tombstone] = field(default_factory=list)
 
     # ---- поиск -------------------------------------------------------
@@ -316,123 +275,51 @@ class Vault:
     # ---- операции ----------------------------------------------------
     def add_service(self, service: Service) -> None:
         """Добавляет сервис."""
-        service.location_at = now()
         self.services.append(service)
 
-    def move_account(self, account: Account, source: Service,
-                     target: Service) -> None:
-        """Переносит учётную запись из одного сервиса в другой.
-
-        Факт переноса фиксируется в журнале записи.
-        """
-        if source is target:
-            return
-        source.accounts = [a for a in source.accounts if a.id != account.id]
-        source.touch()
-        entry = account._snapshot("move", now())
-        entry.comment = f"{source.name} → {target.name}"
-        account.history.insert(0, entry)
-        account.location_at = now()
-        account.touch()
-        target.add_account(account)
-        target.touch()
-
-    # ---- корзина -----------------------------------------------------
-    def trash_service(self, service: Service) -> None:
-        self.trash.append(TrashItem(
-            id=service.id,
-            kind="service",
-            name=service.name,
-            payload=service.to_dict(),
-        ))
+    def delete_service(self, service: Service) -> None:
+        """Необратимо удаляет сервис вместе с его учётными записями."""
+        doomed = {service.id} | {acc.id for acc in service.accounts}
+        self.tombstones = [t for t in self.tombstones if t.id not in doomed]
+        for item_id in doomed:
+            self.tombstones.append(Tombstone(id=item_id))
         self.services = [s for s in self.services if s.id != service.id]
 
-    def trash_account(self, service: Service, account: Account) -> None:
-        self.trash.append(TrashItem(
-            id=account.id,
-            kind="account",
-            name=f"{service.name} / {account.title or account.login}",
-            payload={"service_id": service.id, "service_name": service.name,
-                     "account": account.to_dict()},
-        ))
+    def delete_account(self, service: Service, account: Account) -> None:
+        """Необратимо удаляет учётную запись из сервиса."""
         service.accounts = [a for a in service.accounts if a.id != account.id]
         service.touch()
-
-    def _trashed_service(self, service_id: str) -> TrashItem | None:
-        for item in self.trash:
-            if item.kind == "service" and item.id == service_id:
-                return item
-        return None
-
-    def restore(self, item: TrashItem) -> None:
-        if item.kind == "service":
-            svc = Service.from_dict(item.payload)
-            existing = self.service(svc.id)
-            if existing is None:
-                svc.location_at = now()
-                self.services.append(svc)
-            else:
-                # Сервис уже есть — переносим отсутствующие учётные записи.
-                for acc in svc.accounts:
-                    if existing.account(acc.id) is None:
-                        acc.location_at = now()
-                        existing.accounts.append(acc)
-                existing.touch()
-        else:
-            data = item.payload
-            service_id = data.get("service_id", "")
-            svc = self.service(service_id)
-            if svc is None:
-                # Сервиса нет среди активных. Возможно, он лежит в корзине —
-                # тогда восстанавливаем его, чтобы не создавать дубликат.
-                trashed = self._trashed_service(service_id)
-                if trashed is not None:
-                    svc = Service.from_dict(trashed.payload)
-                    svc.location_at = now()
-                    self.services.append(svc)
-                    self.trash = [t for t in self.trash if t.id != trashed.id]
-                else:
-                    svc = Service(id=service_id or new_id(),
-                                  name=data.get("service_name",
-                                                "Восстановленный сервис"))
-                    svc.location_at = now()
-                    self.services.append(svc)
-            acc = Account.from_dict(data["account"])
-            if svc.account(acc.id) is None:
-                acc.location_at = now()
-                svc.accounts.append(acc)
-            svc.touch()
-        self.trash = [t for t in self.trash if t.id != item.id]
-
-    def purge(self, item: TrashItem) -> None:
-        """Полностью удаляет элемент корзины и ставит tombstone."""
-        self.trash = [t for t in self.trash if t.id != item.id]
-        self.tombstones.append(Tombstone(id=item.id))
-
-    def clear_trash(self) -> int:
-        count = len(self.trash)
-        for item in self.trash:
-            self.tombstones.append(Tombstone(id=item.id))
-        self.trash = []
-        return count
+        self.tombstones = [t for t in self.tombstones if t.id != account.id]
+        self.tombstones.append(Tombstone(id=account.id))
 
     # ---- сериализация -----------------------------------------------
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
             "services": [s.to_dict() for s in self.services],
-            "trash": [t.to_dict() for t in self.trash],
             "tombstones": [t.to_dict() for t in self.tombstones],
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Vault":
         services = [Service.from_dict(s) for s in data.get("services", [])]
+        tombstones = [Tombstone.from_dict(t) for t in data.get("tombstones", [])]
+        # Совместимость со старым форматом с корзиной: объекты из корзины
+        # считаются окончательно удалёнными (ставятся метки удаления).
+        known = {t.id for t in tombstones}
+        for item in data.get("trash", []):
+            if not isinstance(item, dict):
+                continue
+            item_id = item.get("id")
+            if item_id and item_id not in known:
+                tombstones.append(Tombstone(id=item_id,
+                                            deleted_at=float(item.get("deleted_at",
+                                                                      now()))))
+                known.add(item_id)
         return cls(
             version=int(data.get("version", 1)),
             services=services,
-            trash=[TrashItem.from_dict(t) for t in data.get("trash", [])],
-            tombstones=[Tombstone.from_dict(t) for t in data.get("tombstones", [])],
+            tombstones=tombstones,
         )
 
     @classmethod
