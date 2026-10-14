@@ -13,12 +13,14 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPushButton,
     QSplitter,
     QStatusBar,
+    QTableWidget,
     QTableWidgetItem,
     QToolBar,
     QVBoxLayout,
@@ -35,7 +37,7 @@ from .. import order as order_mod
 from .. import search as search_mod
 from . import style
 from .icons import make_icon
-from .widgets import IconColorButton, ReorderListWidget, ReorderTableWidget
+from .widgets import IconColorButton
 from .dialogs import (
     AccountDialog,
     HistoryDialog,
@@ -59,10 +61,10 @@ class MainWindow(QMainWindow):
         self.dark = False
         self._sync_worker: SyncWorker | None = None
         self._check_worker: CheckWorker | None = None
-        # Текущее состояние сортировки (в памяти окна).
-        # None означает ручной порядок (без индикации).
-        self._service_sort_desc: bool | None = None
-        self._account_sort_field: str | None = None
+        # Текущее состояние сортировки (в памяти окна, не синхронизируется).
+        # По умолчанию — по алфавиту А→Я.
+        self._service_sort_desc = False
+        self._account_sort_field = "title"
         self._account_sort_desc = False
 
         self.setWindowTitle("PassManager")
@@ -72,6 +74,7 @@ class MainWindow(QMainWindow):
         self.setStatusBar(QStatusBar())
         self._apply_theme()
         self.refresh_services()
+        self._update_service_sort_button()
         QTimer.singleShot(400, lambda: self.start_sync(manual=False))
 
     # ------------------------------------------------------------------
@@ -132,11 +135,10 @@ class MainWindow(QMainWindow):
         self.search = search
         left_layout.addWidget(search)
 
-        self.service_list = ReorderListWidget()
+        self.service_list = QListWidget()
         self.service_list.setIconSize(QSize(18, 18))
         self.service_list.currentItemChanged.connect(self._on_service_selected)
         self.service_list.itemDoubleClicked.connect(lambda _i: self.edit_service())
-        self.service_list.rowReorderRequested.connect(self._on_services_reordered)
         left_layout.addWidget(self.service_list, 1)
 
         svc_buttons = QHBoxLayout()
@@ -169,7 +171,7 @@ class MainWindow(QMainWindow):
         self.accounts_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         right_layout.addWidget(self.accounts_label)
 
-        self.accounts_table = ReorderTableWidget(0, 5)
+        self.accounts_table = QTableWidget(0, 5)
         self.accounts_table.setHorizontalHeaderLabels(
             ["Название", "Логин", "Пароль", "Комментарий", "Пароль изменён"])
         self.accounts_table.verticalHeader().setVisible(False)
@@ -179,7 +181,6 @@ class MainWindow(QMainWindow):
         self.accounts_table.setAlternatingRowColors(True)
         self.accounts_table.setIconSize(QSize(18, 18))
         self.accounts_table.doubleClicked.connect(lambda _i: self.edit_account())
-        self.accounts_table.rowReorderRequested.connect(self._on_accounts_reordered)
         header_view = self.accounts_table.horizontalHeader()
         header_view.setSectionResizeMode(QHeaderView.Interactive)
         header_view.setStretchLastSection(True)
@@ -301,7 +302,8 @@ class MainWindow(QMainWindow):
         self.service_list.blockSignals(True)
         self.service_list.clear()
         color = style.icon_color()
-        for svc in self.manager.vault.services:
+        for svc in order_mod.sort_services(list(self.manager.vault.services),
+                                           self._service_sort_desc):
             count = len(svc.accounts)
             it = QListWidgetItem(f"{svc.name}  ({count})")
             it.setData(Qt.UserRole, svc.id)
@@ -328,7 +330,6 @@ class MainWindow(QMainWindow):
     def _filter_services(self, text: str) -> None:
         """Скрывает несовпавшие сервисы и подсвечивает найденное."""
         query = search_mod.normalize(text)
-        self._update_drag_mode(bool(query))
         for row in range(self.service_list.count()):
             item = self.service_list.item(row)
             service = self.manager.vault.service(item.data(Qt.UserRole))
@@ -367,25 +368,6 @@ class MainWindow(QMainWindow):
                 self.service_list.setCurrentItem(item)
                 return
 
-    def _update_drag_mode(self, search_active: bool) -> None:
-        """Во время поиска перетаскивание отключается (мешают скрытые строки)."""
-        table_active = search_active or self.current_service() is None
-        self._configure_drag(self.service_list, not search_active)
-        self._configure_drag(self.accounts_table, not table_active)
-
-    @staticmethod
-    def _configure_drag(widget, enabled: bool) -> None:
-        # Порядок строк переставляется вручную (см. ``_ReorderMixin``),
-        # поэтому используется режим ``DragDrop``, а не ``InternalMove``.
-        if enabled:
-            widget.setDragDropMode(QAbstractItemView.DragDrop)
-            widget.setDragEnabled(True)
-            widget.setAcceptDrops(True)
-        else:
-            widget.setDragDropMode(QAbstractItemView.NoDragDrop)
-            widget.setDragEnabled(False)
-            widget.setAcceptDrops(False)
-
     def current_service(self) -> Service | None:
         item = self.service_list.currentItem()
         if item is None:
@@ -393,8 +375,10 @@ class MainWindow(QMainWindow):
         return self.manager.vault.service(item.data(Qt.UserRole))
 
     def _on_service_selected(self, *_args) -> None:
-        # Индикация сортировки относится к конкретному сервису.
-        self._account_sort_field = None
+        # Индикация сортировки относится к конкретному сервису:
+        # при переключении возвращаемся к алфавиту по названию.
+        self._account_sort_field = "title"
+        self._account_sort_desc = False
         self.refresh_accounts()
 
     # ------------------------------------------------------------------
@@ -405,7 +389,6 @@ class MainWindow(QMainWindow):
         self.accounts_table.setRowCount(0)
         if service is None:
             self.accounts_label.setText("Выберите сервис слева")
-            self._update_drag_mode(bool(self.search.text().strip()))
             self._update_sort_headers()
             return
         self.accounts_label.setText(f"Учётные записи — {service.name}")
@@ -416,7 +399,10 @@ class MainWindow(QMainWindow):
         # только по имени), показываем все его записи.
         service_matched_by_name = bool(
             query and search_mod.service_name_matches(service, query))
-        for acc in service.accounts:
+        accounts = order_mod.sort_accounts(list(service.accounts),
+                                           self._account_sort_field,
+                                           self._account_sort_desc)
+        for acc in accounts:
             fields = search_mod.matching_fields(acc, query) if query else set()
             # Прячем записи без совпадений, кроме случая, когда сервис
             # целиком совпал по имени.
@@ -435,7 +421,6 @@ class MainWindow(QMainWindow):
             self.accounts_table.setItem(row, 4, QTableWidgetItem(to_date(acc.password_changed_at)))
             self._highlight_account_row(row, acc, query)
         self._restore_account_selection(select_id)
-        self._update_drag_mode(bool(query))
         self._update_sort_headers()
 
     def _restore_account_selection(self, account_id: str | None) -> None:
@@ -549,7 +534,7 @@ class MainWindow(QMainWindow):
             acc = Account(title=data["title"], login=data["login"],
                           password=data["password"], comment=data["comment"],
                           icon=data.get("icon", ""))
-            target.add_account_top(acc)
+            target.add_account(acc)
             target.touch()
             self._persist()
             self.refresh_services(select_id=target.id)
@@ -580,10 +565,8 @@ class MainWindow(QMainWindow):
                 account.touch()
             target = self.manager.vault.service(data["service_id"])
             if target is not None and target is not service:
-                # Перенос в другой сервис — своя запись истории, порядок
-                # сортировки сбрасывается (запись встаёт в начало).
+                # Перенос в другой сервис — своя запись истории.
                 self.manager.vault.move_account(account, service, target)
-                self._account_sort_field = None
                 self._persist()
                 self.refresh_services(select_id=target.id)
                 self.refresh_accounts(select_id=account.id)
@@ -615,12 +598,12 @@ class MainWindow(QMainWindow):
     # Сортировка
     # ------------------------------------------------------------------
     def sort_services(self) -> None:
-        """Сортирует сервисы по алфавиту, переключая направление."""
-        self._service_sort_desc = (
-            False if self._service_sort_desc is None
-            else not self._service_sort_desc)
-        order_mod.apply_service_sort(self.manager.vault, self._service_sort_desc)
-        self._persist()
+        """Сортирует сервисы по алфавиту, переключая направление.
+
+        Порядок — только отображение: в данных он не хранится и не
+        синхронизируется.
+        """
+        self._service_sort_desc = not self._service_sort_desc
         self.refresh_services(select_id=self._selected_service_id())
         self._update_service_sort_button()
         self.set_status("Сервисы отсортированы "
@@ -628,10 +611,6 @@ class MainWindow(QMainWindow):
                            else "по возрастанию."))
 
     def _update_service_sort_button(self) -> None:
-        if self._service_sort_desc is None:
-            self.tv_sort_btn.set_icon_name("arrow-up-down")
-            self.tv_sort_btn.setToolTip("Сортировать по алфавиту")
-            return
         icon = "arrow-down" if self._service_sort_desc else "arrow-up"
         self.tv_sort_btn.set_icon_name(icon)
         direction = "Я→А" if self._service_sort_desc else "А→Я"
@@ -669,9 +648,6 @@ class MainWindow(QMainWindow):
         self._account_sort_field = field
         self._account_sort_desc = descending
         current = self.current_account()
-        order_mod.apply_account_sort(service, field, descending)
-        service.touch()
-        self._persist()
         self.refresh_accounts(select_id=current.id if current else None)
         direction = "по убыванию" if descending else "по возрастанию"
         self.set_status("Записи отсортированы по полю «"
@@ -690,30 +666,6 @@ class MainWindow(QMainWindow):
             item = self.accounts_table.horizontalHeaderItem(column)
             if item is not None:
                 item.setText(label + marker)
-
-    def _on_services_reordered(self, ordered_ids: list[str]) -> None:
-        if self.search.text().strip():
-            return
-        self.manager.vault.reorder_services(ordered_ids)
-        # Ручной порядок — направление сортировки сбрасывается.
-        self._service_sort_desc = None
-        self._persist()
-        self.refresh_services(select_id=self._selected_service_id())
-        self._update_service_sort_button()
-        self.set_status("Порядок сервисов обновлён.")
-
-    def _on_accounts_reordered(self, ordered_ids: list[str]) -> None:
-        service = self.current_service()
-        if service is None or self.search.text().strip():
-            return
-        current = self.current_account()
-        service.reorder(ordered_ids)
-        # Ручной порядок — индикация сортировки в заголовках убирается.
-        self._account_sort_field = None
-        service.touch()
-        self._persist()
-        self.refresh_accounts(select_id=current.id if current else None)
-        self.set_status("Порядок записей обновлён.")
 
     # ------------------------------------------------------------------
     # Копирование
