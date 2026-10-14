@@ -172,7 +172,7 @@ class MainWindow(QMainWindow):
 
         self.accounts_table = QTableWidget(0, 5)
         self.accounts_table.setHorizontalHeaderLabels(
-            ["Название", "Логин", "Пароль", "Комментарий", "Пароль изменён"])
+            ["Название", "Логин", "Пароль", "Пароль изменён", "Комментарий"])
         self.accounts_table.verticalHeader().setVisible(False)
         self.accounts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.accounts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -191,8 +191,8 @@ class MainWindow(QMainWindow):
         header_view.resizeSection(0, 180)
         header_view.resizeSection(1, 180)
         header_view.resizeSection(2, 120)
-        header_view.resizeSection(3, 220)
-        header_view.resizeSection(4, 120)
+        header_view.resizeSection(3, 120)
+        header_view.resizeSection(4, 220)
         right_layout.addWidget(self.accounts_table, 1)
 
         acc_buttons = QHBoxLayout()
@@ -412,8 +412,8 @@ class MainWindow(QMainWindow):
             self.accounts_table.setItem(row, 0, title)
             self.accounts_table.setItem(row, 1, QTableWidgetItem(acc.login))
             self.accounts_table.setItem(row, 2, QTableWidgetItem("•" * min(len(acc.password), 12) or "—"))
-            self.accounts_table.setItem(row, 3, QTableWidgetItem(acc.comment))
-            self.accounts_table.setItem(row, 4, QTableWidgetItem(to_date(acc.password_changed_at)))
+            self.accounts_table.setItem(row, 3, QTableWidgetItem(to_date(acc.password_changed_at)))
+            self.accounts_table.setItem(row, 4, QTableWidgetItem(acc.comment))
             self._highlight_account_row(row, acc, query)
         self._restore_account_selection(select_id)
         self._update_sort_headers()
@@ -434,7 +434,7 @@ class MainWindow(QMainWindow):
             return
         color = QBrush(QColor(style.highlight_color()))
         text = QBrush(QColor(style.highlight_text_color()))
-        columns = {"title": 0, "login": 1, "comment": 3}
+        columns = {"title": 0, "login": 1, "comment": 4}
         for field, column in columns.items():
             if field not in fields:
                 continue
@@ -604,8 +604,8 @@ class MainWindow(QMainWindow):
     _ACCOUNT_SORT_COLUMNS = {
         0: "title",
         1: "login",
-        3: "comment",
-        4: "password_changed_at",
+        3: "password_changed_at",
+        4: "comment",
     }
 
     def _on_header_clicked(self, column: int) -> None:
@@ -636,7 +636,7 @@ class MainWindow(QMainWindow):
 
     def _update_sort_headers(self) -> None:
         """Показывает направление сортировки прямо в заголовках столбцов."""
-        labels = ["Название", "Логин", "Пароль", "Комментарий", "Пароль изменён"]
+        labels = ["Название", "Логин", "Пароль", "Пароль изменён", "Комментарий"]
         for column, label in enumerate(labels):
             marker = ""
             if (self._account_sort_field is not None
