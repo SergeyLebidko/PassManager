@@ -20,7 +20,6 @@ from .models import (
     Tombstone,
     TrashItem,
     Vault,
-    _normalize_order,
 )
 
 
@@ -46,19 +45,17 @@ def _service_copy(svc: Service) -> Service:
         icon=svc.icon,
         created_at=svc.created_at,
         modified_at=svc.modified_at,
-        order=svc.order,
-        order_at=svc.order_at,
         location_at=svc.location_at,
     )
 
 
 def _claim_service(claims: dict[str, tuple], svc: Service, location_ts: float,
                    in_trash: bool, trash_item: TrashItem | None) -> None:
-    """Обновляет лучшего кандидата для сервиса: содержимое, порядок, место.
+    """Обновляет лучшего кандидата для сервиса: содержимое и место.
 
-    Содержимое берётся по ``modified_at``, порядок — по ``order_at``,
-    а расположение (активен сервис или в корзине) — по ``location_ts``.
-    При равном времени расположения предпочитаем корзину (удаление).
+    Содержимое берётся по ``modified_at``, а расположение (активен сервис
+    или в корзине) — по ``location_ts``. При равном времени расположения
+    предпочитаем корзину (удаление).
     """
     current = claims.get(svc.id)
     if current is None:
@@ -73,10 +70,6 @@ def _claim_service(claims: dict[str, tuple], svc: Service, location_ts: float,
         cur_svc.name = svc.name
         cur_svc.icon = svc.icon
         cur_svc.modified_at = svc.modified_at
-    # Порядок — по более новой метке ручного изменения.
-    if svc.order_at >= cur_svc.order_at:
-        cur_svc.order = svc.order
-    cur_svc.order_at = _max_ts(svc.order_at, cur_svc.order_at)
     # Расположение.
     if location_ts > cur_ts or (location_ts == cur_ts and in_trash and not cur_trash):
         cur_svc.location_at = location_ts
@@ -109,11 +102,11 @@ def _collect_service_claims(vaults: list[Vault],
 
 def _claim_location(claims: dict[str, tuple], acc: Account, service_id: str,
                     location_ts: float, in_trash: bool) -> None:
-    """Обновляет лучшего кандидата для записи: содержимое, порядок, место.
+    """Обновляет лучшего кандидата для записи: содержимое и место.
 
-    Содержимое берётся по ``modified_at``, порядок — по ``order_at``,
-    а расположение — по ``location_ts``. Метки независимы, поэтому правка
-    на одном устройстве и перенос на другом не затирают друг друга.
+    Содержимое берётся по ``modified_at``, а расположение — по
+    ``location_ts``. Метки независимы, поэтому правка на одном устройстве и
+    перенос на другом не затирают друг друга.
     """
     current = claims.get(acc.id)
     if current is None:
@@ -123,9 +116,6 @@ def _claim_location(claims: dict[str, tuple], acc: Account, service_id: str,
 
     cur_acc, cur_service, cur_ts, cur_trash = current
     winner = acc if acc.modified_at > cur_acc.modified_at else cur_acc
-    order_src = acc if acc.order_at >= cur_acc.order_at else cur_acc
-    winner.order = order_src.order
-    winner.order_at = _max_ts(acc.order_at, cur_acc.order_at)
     # При равном времени расположения предпочитаем корзину (удаление).
     if location_ts > cur_ts or (location_ts == cur_ts and in_trash and not cur_trash):
         winner.location_at = location_ts
@@ -230,9 +220,6 @@ def merge(local: Vault, remote: Vault) -> Vault:
         acc.location_at = location_ts
         service.accounts.append(acc)
 
-    for service in services.values():
-        _normalize_order(service.accounts)
-
     # Синхронизируем корзину сервисов с победившим расположением.
     for svc, location_ts, in_trash, item in service_claims.values():
         if not in_trash:
@@ -289,7 +276,10 @@ def merge(local: Vault, remote: Vault) -> Vault:
                 tombstones[ts.id] = ts
 
     merged_services = list(services.values())
-    merged_services.sort(key=lambda s: (s.order, s.id))
+    # Детерминированный порядок в файле (порядок отображения задаёт интерфейс).
+    for service in merged_services:
+        service.accounts.sort(key=lambda a: ((a.title or "").casefold(), a.id))
+    merged_services.sort(key=lambda s: ((s.name or "").casefold(), s.id))
 
     return Vault(
         version=max(local.version, remote.version),
