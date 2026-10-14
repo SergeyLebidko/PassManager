@@ -370,10 +370,8 @@ class MainWindow(QMainWindow):
         return self.manager.vault.service(item.data(Qt.UserRole))
 
     def _on_service_selected(self, *_args) -> None:
-        # Индикация сортировки относится к конкретному сервису:
-        # при переключении возвращаемся к алфавиту по названию.
-        self._account_sort_field = "title"
-        self._account_sort_desc = False
+        # Сортировка записей не привязана к сервису: при переключении
+        # сохраняем выбранное поле и направление.
         self.refresh_accounts()
 
     # ------------------------------------------------------------------
