@@ -589,7 +589,7 @@ class MainWindow(QMainWindow):
                            else "по возрастанию."))
 
     def _update_service_sort_button(self) -> None:
-        icon = "arrow-down" if self._service_sort_desc else "arrow-up"
+        icon = "arrow-up" if self._service_sort_desc else "arrow-down"
         self.tv_sort_btn.set_icon_name(icon)
         direction = "Я→А" if self._service_sort_desc else "А→Я"
         self.tv_sort_btn.setToolTip(f"Сортировать по алфавиту ({direction})")
@@ -640,7 +640,7 @@ class MainWindow(QMainWindow):
             if (self._account_sort_field is not None
                     and self._ACCOUNT_SORT_COLUMNS.get(column)
                     == self._account_sort_field):
-                marker = " ↓" if self._account_sort_desc else " ↑"
+                marker = " ↑" if self._account_sort_desc else " ↓"
             item = self.accounts_table.horizontalHeaderItem(column)
             if item is not None:
                 item.setText(label + marker)
