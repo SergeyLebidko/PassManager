@@ -44,7 +44,6 @@ from .dialogs import (
     MasterPasswordDialog,
     ServiceDialog,
     SettingsDialog,
-    TrashDialog,
     CLIPBOARD_HINT,
     confirm,
     copy_to_clipboard,
@@ -147,7 +146,7 @@ class MainWindow(QMainWindow):
         add_service.clicked.connect(self.add_service)
         edit_service = self._icon_button("edit", "Изменить сервис")
         edit_service.clicked.connect(self.edit_service)
-        del_service = self._icon_button("trash", "Удалить сервис в корзину",
+        del_service = self._icon_button("trash", "Удалить сервис",
                                         "danger")
         del_service.clicked.connect(self.delete_service)
         self.tv_sort_btn = self._icon_button("arrow-up-down",
@@ -203,7 +202,7 @@ class MainWindow(QMainWindow):
         add_acc.clicked.connect(self.add_account)
         edit_acc = self._icon_button("edit", "Изменить учётную запись")
         edit_acc.clicked.connect(self.edit_account)
-        del_acc = self._icon_button("trash", "Удалить учётную запись в корзину",
+        del_acc = self._icon_button("trash", "Удалить учётную запись",
                                     "danger")
         del_acc.clicked.connect(self.delete_account)
         copy_login = self._icon_button("person", "Копировать логин")
@@ -251,10 +250,6 @@ class MainWindow(QMainWindow):
         export_action = QAction("Экспорт в TXT", self)
         export_action.triggered.connect(self.export_txt)
         toolbar.addAction(export_action)
-
-        trash_action = QAction("Корзина", self)
-        trash_action.triggered.connect(self.open_trash)
-        toolbar.addAction(trash_action)
 
     # ------------------------------------------------------------------
     # Тема
@@ -508,14 +503,14 @@ class MainWindow(QMainWindow):
             return
         if not confirm(
             self, "Удаление сервиса",
-            f"Переместить сервис «{service.name}» и все его учётные записи "
-            f"({len(service.accounts)}) в корзину?",
+            f"Удалить сервис «{service.name}» и все его учётные записи "
+            f"({len(service.accounts)})? Действие необратимо.",
         ):
             return
-        self.manager.vault.trash_service(service)
+        self.manager.vault.delete_service(service)
         self._persist()
         self.refresh_services()
-        self.set_status("Сервис перемещён в корзину.")
+        self.set_status("Сервис удалён.")
 
     # ------------------------------------------------------------------
     # Операции с учётными записями
@@ -524,20 +519,16 @@ class MainWindow(QMainWindow):
         service = self._require_service()
         if service is None:
             return
-        dlg = AccountDialog(service_name=service.name,
-                            services=self.manager.vault.services,
-                            current_service_id=service.id, parent=self)
+        dlg = AccountDialog(service_name=service.name, parent=self)
         if dlg.exec():
             data = dlg.result_data
-            target = (self.manager.vault.service(data["service_id"])
-                      or service)
             acc = Account(title=data["title"], login=data["login"],
                           password=data["password"], comment=data["comment"],
                           icon=data.get("icon", ""))
-            target.add_account(acc)
-            target.touch()
+            service.add_account(acc)
+            service.touch()
             self._persist()
-            self.refresh_services(select_id=target.id)
+            self.refresh_services(select_id=service.id)
             self.refresh_accounts(select_id=acc.id)
             self.set_status("Учётная запись добавлена.")
 
@@ -546,9 +537,7 @@ class MainWindow(QMainWindow):
         if account is None:
             return
         service = self.current_service()
-        dlg = AccountDialog(account, service_name=service.name,
-                            services=self.manager.vault.services,
-                            current_service_id=service.id, parent=self)
+        dlg = AccountDialog(account, service_name=service.name, parent=self)
         if dlg.exec():
             data = dlg.result_data
             # История фиксируется до изменений, чтобы сохранить прежнее
@@ -563,15 +552,6 @@ class MainWindow(QMainWindow):
             if new_icon != account.icon:
                 account.icon = new_icon
                 account.touch()
-            target = self.manager.vault.service(data["service_id"])
-            if target is not None and target is not service:
-                # Перенос в другой сервис — своя запись истории.
-                self.manager.vault.move_account(account, service, target)
-                self._persist()
-                self.refresh_services(select_id=target.id)
-                self.refresh_accounts(select_id=account.id)
-                self.set_status(f"Учётная запись перенесена в «{target.name}».")
-                return
             service.touch()
             self._persist()
             self.refresh_services(select_id=service.id)
@@ -586,13 +566,13 @@ class MainWindow(QMainWindow):
         name = account.title or account.login
         if not confirm(
             self, "Удаление учётной записи",
-            f"Переместить учётную запись «{name}» в корзину?",
+            f"Удалить учётную запись «{name}»? Действие необратимо.",
         ):
             return
-        self.manager.vault.trash_account(service, account)
+        self.manager.vault.delete_account(service, account)
         self._persist()
         self.refresh_services(select_id=service.id)
-        self.set_status("Учётная запись перемещена в корзину.")
+        self.set_status("Учётная запись удалена.")
 
     # ------------------------------------------------------------------
     # Сортировка
@@ -698,58 +678,6 @@ class MainWindow(QMainWindow):
         if account is None:
             return
         HistoryDialog(account, parent=self).exec()
-
-    # ------------------------------------------------------------------
-    # Корзина
-    # ------------------------------------------------------------------
-    def open_trash(self) -> None:
-        while True:
-            items = list(self.manager.vault.trash)
-            dlg = TrashDialog(items, parent=self)
-            if not dlg.exec():
-                break
-            if dlg.action == "restore":
-                self._trash_restore(dlg.selected_id)
-            elif dlg.action == "delete":
-                self._trash_delete(dlg.selected_id)
-            elif dlg.action == "clear":
-                if self._trash_clear():
-                    break
-
-    def _trash_restore(self, item_id: str | None) -> None:
-        item = next((t for t in self.manager.vault.trash if t.id == item_id), None)
-        if item is None:
-            return
-        self.manager.vault.restore(item)
-        self._persist()
-        self.refresh_services()
-        self.set_status(f"Восстановлено: {item.name}")
-
-    def _trash_delete(self, item_id: str | None) -> None:
-        item = next((t for t in self.manager.vault.trash if t.id == item_id), None)
-        if item is None:
-            return
-        if not confirm(
-            self, "Удаление навсегда",
-            f"Удалить «{item.name}» навсегда? Восстановить будет невозможно.",
-        ):
-            return
-        self.manager.vault.purge(item)
-        self._persist()
-        self.set_status("Элемент удалён навсегда.")
-
-    def _trash_clear(self) -> bool:
-        if not self.manager.vault.trash:
-            return True
-        if not confirm(
-            self, "Очистка корзины",
-            "Удалить все элементы корзины навсегда?",
-        ):
-            return False
-        count = self.manager.vault.clear_trash()
-        self._persist()
-        self.set_status(f"Корзина очищена ({count}).")
-        return True
 
     # ------------------------------------------------------------------
     # Экспорт

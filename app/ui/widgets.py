@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QSize, Qt
-from PySide6.QtWidgets import (
-    QComboBox,
-    QPushButton,
-)
+from PySide6.QtWidgets import QPushButton
 
 from . import style
 from .icons import make_icon
@@ -76,29 +73,3 @@ class IconColorButton(QPushButton):
             self._apply_icon()
         return handled
 
-
-class RoundedComboBox(QComboBox):
-    """Выпадающий список со скруглённым всплывающим окном.
-
-    Глобальный QSS не применяется к всплывающему окну списка — оно является
-    отдельным top-level окном. Поэтому рамку со скруглением задаём напрямую
-    контейнеру попапа при его показе. Фон делаем прозрачным, чтобы
-    ``border-radius`` реально «отрезал» углы.
-    """
-
-    def _style_popup(self) -> None:
-        container = self.view().window()
-        if container is None:
-            return
-        container.setObjectName("comboPopup")
-        container.setAttribute(Qt.WA_TranslucentBackground, True)
-        qss = style.combo_popup_qss()
-        container.setStyleSheet(qss)
-        self.view().setStyleSheet("background: transparent;")
-
-    def showPopup(self) -> None:  # noqa: N802 (Qt-стиль)
-        # Стиль можно задать и до показа, и после — делаем оба раза,
-        # т.к. отдельное окно попапа создаётся лениво и может переоформиться.
-        self._style_popup()
-        super().showPopup()
-        self._style_popup()
