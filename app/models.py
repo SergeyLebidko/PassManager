@@ -229,6 +229,7 @@ class Service:
     modified_at: float = field(default_factory=now)
     order: float = 0.0
     order_at: float = 0.0  # когда менялся порядок (для синхронизации)
+    location_at: float = 0.0  # когда сервис появлялся/восстанавливался активным
 
     def touch(self) -> None:
         self.modified_at = now()
@@ -269,6 +270,7 @@ class Service:
             "modified_at": self.modified_at,
             "order": self.order,
             "order_at": self.order_at,
+            "location_at": self.location_at,
         }
 
     @classmethod
@@ -282,6 +284,7 @@ class Service:
             modified_at=float(data.get("modified_at", now())),
             order=float(data.get("order", 0.0)),
             order_at=float(data.get("order_at", 0.0)),
+            location_at=float(data.get("location_at", 0.0)),
         )
 
 
@@ -368,6 +371,7 @@ class Vault:
         """Добавляет сервис в начало списка."""
         service.order = _next_top_order(self.services)
         service.order_at = now()
+        service.location_at = now()
         self.services.append(service)
         _normalize_order(self.services)
 
@@ -435,6 +439,7 @@ class Vault:
             if existing is None:
                 svc.order = _next_bottom_order(self.services)
                 svc.order_at = now()
+                svc.location_at = now()
                 self.services.append(svc)
                 _normalize_order(self.services)
             else:
@@ -459,6 +464,7 @@ class Vault:
                     svc = Service.from_dict(trashed.payload)
                     svc.order = _next_bottom_order(self.services)
                     svc.order_at = now()
+                    svc.location_at = now()
                     self.services.append(svc)
                     _normalize_order(self.services)
                     self.trash = [t for t in self.trash if t.id != trashed.id]
@@ -468,6 +474,7 @@ class Vault:
                                                 "Восстановленный сервис"))
                     svc.order = _next_bottom_order(self.services)
                     svc.order_at = now()
+                    svc.location_at = now()
                     self.services.append(svc)
                     _normalize_order(self.services)
             acc = Account.from_dict(data["account"])
