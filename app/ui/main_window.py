@@ -31,7 +31,7 @@ from .. import storage
 from ..crypto import CryptoError, WrongPasswordError
 from ..export import write_export
 from ..manager import Manager, SyncResult
-from ..models import Account, Service, to_date
+from ..models import Account, Service, to_iso
 from ..reveal import reveal_in_file_manager
 from .. import order as order_mod
 from .. import search as search_mod
@@ -191,7 +191,7 @@ class MainWindow(QMainWindow):
         header_view.resizeSection(0, 180)
         header_view.resizeSection(1, 180)
         header_view.resizeSection(2, 120)
-        header_view.resizeSection(3, 120)
+        header_view.resizeSection(3, 140)
         header_view.resizeSection(4, 220)
         right_layout.addWidget(self.accounts_table, 1)
 
@@ -412,7 +412,7 @@ class MainWindow(QMainWindow):
             self.accounts_table.setItem(row, 0, title)
             self.accounts_table.setItem(row, 1, QTableWidgetItem(acc.login))
             self.accounts_table.setItem(row, 2, QTableWidgetItem("•" * min(len(acc.password), 12) or "—"))
-            self.accounts_table.setItem(row, 3, QTableWidgetItem(to_date(acc.password_changed_at)))
+            self.accounts_table.setItem(row, 3, QTableWidgetItem(to_iso(acc.password_changed_at)))
             self.accounts_table.setItem(row, 4, QTableWidgetItem(acc.comment))
             self._highlight_account_row(row, acc, query)
         self._restore_account_selection(select_id)
