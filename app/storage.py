@@ -26,6 +26,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "webdav_url": "https://lebidko-krd2.netcraze.pro/webdav/PassManager",
     "webdav_login": "",
     "webdav_password_enc": "",
+    "dark_theme": False,
     "pending_reencrypt": False,
 }
 

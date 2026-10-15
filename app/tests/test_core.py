@@ -883,6 +883,26 @@ def test_manager_change_master_password_asks_before_overwrite() -> None:
             storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
 
 
+def test_config_persists_theme_and_keeps_defaults() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        old_cfg = storage.CONFIG_FILE
+        storage.CONFIG_FILE = Path(tmp) / "config.json"
+        try:
+            cfg = storage.load_config()
+            assert cfg["dark_theme"] is False
+
+            cfg["dark_theme"] = True
+            storage.save_config(cfg)
+
+            reloaded = storage.load_config()
+            assert reloaded["dark_theme"] is True
+            # Остальные значения по умолчанию не потерялись.
+            assert "webdav_url" in reloaded
+            assert reloaded["pending_reencrypt"] is False
+        finally:
+            storage.CONFIG_FILE = old_cfg
+
+
 def run_all() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

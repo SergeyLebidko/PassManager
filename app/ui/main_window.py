@@ -139,7 +139,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.manager = manager
         self.app = app
-        self.dark = False
+        # Тема — локальная настройка устройства, хранится в config.json
+        # (не в синхронизируемом хранилище).
+        self.dark = bool(manager.config.get("dark_theme", False))
         self._sync_worker: SyncWorker | None = None
         self._check_worker: CheckWorker | None = None
         self._change_worker: ChangePasswordWorker | None = None
@@ -376,6 +378,10 @@ class MainWindow(QMainWindow):
 
     def toggle_theme(self) -> None:
         self.dark = not self.dark
+        # Тема — локальная настройка устройства: сохраняем, чтобы она
+        # восстановилась при следующем запуске.
+        self.manager.config["dark_theme"] = self.dark
+        storage.save_config(self.manager.config)
         self._apply_theme()
 
     # ------------------------------------------------------------------
@@ -1024,8 +1030,9 @@ def run() -> int:
     app.setStyle("Fusion")
     _install_russian_translation(app)
     # Тема применяется до открытия диалогов (в т.ч. ввода мастер-пароля),
-    # иначе они выглядят в стандартном стиле Fusion.
-    style.apply_theme(app, False)
+    # иначе они выглядят в стандартном стиле Fusion. Берём сохранённую тему —
+    # это локальная настройка и она читается без мастер-пароля.
+    style.apply_theme(app, bool(storage.load_config().get("dark_theme", False)))
 
     manager = Manager()
 
