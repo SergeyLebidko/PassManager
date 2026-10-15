@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QLibraryInfo, QSize, QTimer, Qt, QTranslator
-from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence
+from PySide6.QtCore import QLibraryInfo, QRect, QSize, QTimer, Qt, QTranslator
+from PySide6.QtGui import QAction, QBrush, QColor, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
@@ -20,6 +20,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSplitter,
     QStatusBar,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QToolBar,
@@ -57,6 +60,65 @@ from .worker import (
     CheckWorker,
     SyncWorker,
 )
+
+
+class _ServiceItemDelegate(QStyledItemDelegate):
+    """Рисует имя сервиса слева, а количество записей — у правого края списка.
+
+    Количество хранится в отдельной роли (:data:`COUNT_ROLE`), а не в тексте
+    элемента, поэтому визуально это отдельный столбец, прижатый к правому краю,
+    и в поиск по тексту он не попадает.
+    """
+
+    COUNT_ROLE = Qt.UserRole + 1
+    RIGHT_MARGIN = 12
+    GAP = 10
+
+    def sizeHint(self, option, index) -> QSize:  # noqa: N802
+        size = super().sizeHint(option, index)
+        # Ширина 0: список сам растягивает элемент на всю видимую ширину,
+        # поэтому горизонтальной прокрутки нет, а счётчик всегда у правого края
+        # видимой области (а не у края более широкого элемента).
+        return QSize(0, size.height())
+
+    def paint(self, painter, option, index) -> None:  # noqa: N802
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        name = opt.text
+        count = index.data(self.COUNT_ROLE)
+        # Базовый стиль рисует фон, выделение и иконку, но без текста: имя и
+        # количество раскладываем сами, чтобы прижать счётчик к правому краю.
+        opt.text = ""
+        widget = opt.widget
+        style = widget.style() if widget is not None else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, widget)
+
+        painter.save()
+        painter.setFont(opt.font)
+        if opt.state & QStyle.State_Selected:
+            painter.setPen(opt.palette.color(QPalette.HighlightedText))
+        elif opt.state & QStyle.State_Enabled:
+            painter.setPen(opt.palette.color(QPalette.Text))
+        else:
+            painter.setPen(opt.palette.color(QPalette.Disabled, QPalette.Text))
+
+        rect = opt.rect
+        text_rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, widget)
+        metrics = painter.fontMetrics()
+        right = rect.right() - self.RIGHT_MARGIN
+        name_rect = QRect(text_rect)
+        if count is not None:
+            count_text = f"({count})"
+            count_width = metrics.horizontalAdvance(count_text)
+            count_rect = QRect(right - count_width, rect.top(),
+                               count_width, rect.height())
+            painter.drawText(count_rect, Qt.AlignRight | Qt.AlignVCenter,
+                             count_text)
+            name_rect.setRight(count_rect.left() - self.GAP)
+        elided = metrics.elidedText(name, Qt.ElideRight,
+                                    max(0, name_rect.width()))
+        painter.drawText(name_rect, Qt.AlignLeft | Qt.AlignVCenter, elided)
+        painter.restore()
 
 
 class MainWindow(QMainWindow):
@@ -153,6 +215,8 @@ class MainWindow(QMainWindow):
 
         self.service_list = QListWidget()
         self.service_list.setIconSize(QSize(18, 18))
+        self.service_list.setItemDelegate(
+            _ServiceItemDelegate(self.service_list))
         self.service_list.currentItemChanged.connect(self._on_service_selected)
         self.service_list.itemDoubleClicked.connect(lambda _i: self.edit_service())
         left_layout.addWidget(self.service_list, 1)
@@ -316,9 +380,11 @@ class MainWindow(QMainWindow):
         color = style.icon_color()
         for svc in order_mod.sort_services(list(self.manager.vault.services),
                                            self._service_sort_desc):
-            count = len(svc.accounts)
-            it = QListWidgetItem(f"{svc.name}  ({count})")
+            it = QListWidgetItem(svc.name)
             it.setData(Qt.UserRole, svc.id)
+            # Количество записей — отдельной ролью: делегат рисует его у
+            # правого края, а не в тексте (поиск его не учитывает).
+            it.setData(_ServiceItemDelegate.COUNT_ROLE, len(svc.accounts))
             if svc.icon:
                 it.setIcon(make_icon(svc.icon, color))
             self.service_list.addItem(it)
