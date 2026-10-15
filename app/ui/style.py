@@ -516,6 +516,16 @@ def highlight_text_color() -> str:
     return "#ffe9a8" if _current_dark else "#5a4700"
 
 
+def selected_text_color() -> str:
+    """Цвет текста выбранного элемента списка/дерева.
+
+    Должен совпадать с ``color`` у ``QListWidget::item:selected`` в QSS выше:
+    стиль Qt не кладёт это значение в палитру, поэтому делегатам его нужно
+    задавать явно.
+    """
+    return "#eaf0ff" if _current_dark else "#12315f"
+
+
 def icon_hover_color() -> str:
     """Фон ячейки иконки при наведении (в сетке выбора иконок)."""
     return "#343a44" if _current_dark else "#eef1f6"

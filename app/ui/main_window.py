@@ -95,20 +95,14 @@ class _ServiceItemDelegate(QStyledItemDelegate):
 
         painter.save()
         painter.setFont(opt.font)
-        if opt.state & QStyle.State_Selected:
-            painter.setPen(opt.palette.color(QPalette.HighlightedText))
-        elif opt.state & QStyle.State_Enabled:
-            painter.setPen(opt.palette.color(QPalette.Text))
-        else:
-            painter.setPen(opt.palette.color(QPalette.Disabled, QPalette.Text))
-
+        painter.setPen(self._text_color(opt, index))
         rect = opt.rect
         text_rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, widget)
         metrics = painter.fontMetrics()
         right = rect.right() - self.RIGHT_MARGIN
         name_rect = QRect(text_rect)
         if count is not None:
-            count_text = f"({count})"
+            count_text = str(count)
             count_width = metrics.horizontalAdvance(count_text)
             count_rect = QRect(right - count_width, rect.top(),
                                count_width, rect.height())
@@ -119,6 +113,25 @@ class _ServiceItemDelegate(QStyledItemDelegate):
                                     max(0, name_rect.width()))
         painter.drawText(name_rect, Qt.AlignLeft | Qt.AlignVCenter, elided)
         painter.restore()
+
+    @staticmethod
+    def _text_color(opt: QStyleOptionViewItem, index) -> QColor:
+        """Цвет текста с учётом подсветки поиска и выделения.
+
+        Тема задаёт цвет выделенного элемента через QSS, а не через палитру,
+        поэтому берём его из :func:`app.ui.style.selected_text_color` — иначе
+        на светлом фоне выделения текст оставался бы белым. У выделенного
+        элемента приоритет у цвета выделения: фон выделения перекрывает фон
+        подсветки, и совпадение всё равно видно по жирному шрифту.
+        """
+        if opt.state & QStyle.State_Selected:
+            return QColor(style.selected_text_color())
+        foreground = index.data(Qt.ForegroundRole)
+        if isinstance(foreground, QBrush) and foreground.style() != Qt.NoBrush:
+            return foreground.color()
+        if opt.state & QStyle.State_Enabled:
+            return opt.palette.color(QPalette.Text)
+        return opt.palette.color(QPalette.Disabled, QPalette.Text)
 
 
 class MainWindow(QMainWindow):
