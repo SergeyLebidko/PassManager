@@ -40,6 +40,7 @@ from .icons import make_icon
 from .widgets import IconColorButton
 from .dialogs import (
     AccountDialog,
+    AdoptRemotePasswordDialog,
     ChangeMasterPasswordDialog,
     HistoryDialog,
     MasterPasswordDialog,
@@ -50,7 +51,12 @@ from .dialogs import (
     copy_to_clipboard,
     notify,
 )
-from .worker import ChangePasswordWorker, CheckWorker, SyncWorker
+from .worker import (
+    AdoptRemoteWorker,
+    ChangePasswordWorker,
+    CheckWorker,
+    SyncWorker,
+)
 
 
 class MainWindow(QMainWindow):
@@ -62,6 +68,15 @@ class MainWindow(QMainWindow):
         self._sync_worker: SyncWorker | None = None
         self._check_worker: CheckWorker | None = None
         self._change_worker: ChangePasswordWorker | None = None
+        self._adopt_worker: AdoptRemoteWorker | None = None
+        # Запрос нового пароля удалённой копии: показываем один раз за запуск
+        # при автоматической синхронизации (при ручной — всегда).
+        self._adopt_prompted = False
+        self._adopt_dialog_open = False
+        # Была ли последняя синхронизация ручной (нужно для запроса пароля).
+        self._sync_manual = False
+        # Новый пароль, ожидающий подтверждения перезаписи серверной копии.
+        self._pending_change_password = ""
         # Текущее состояние сортировки (в памяти окна, не синхронизируется).
         # По умолчанию — по алфавиту А→Я.
         self._service_sort_desc = False
@@ -767,6 +782,7 @@ class MainWindow(QMainWindow):
         if not dlg.exec():
             return
         self.set_status("Смена мастер-пароля и синхронизация...")
+        self._pending_change_password = dlg.new_password
         self._change_worker = ChangePasswordWorker(
             self.manager, dlg.new_password)
         self._change_worker.finished_ok.connect(self._on_change_done)
@@ -777,6 +793,25 @@ class MainWindow(QMainWindow):
         # «Настройки» могут быть ещё открыты — показываем окно поверх активного
         # модального диалога, а если его нет — поверх главного окна.
         parent = QApplication.activeModalWidget() or self
+        # Серверная копия зашифрована третьим паролем и не открывается новым:
+        # спрашиваем разрешение на перезапись, прежде чем потерять серверные
+        # данные.
+        if result.needs_overwrite:
+            if confirm(parent, "Смена мастер-пароля",
+                       "Удалённая копия зашифрована другим мастер-паролем и не "
+                       "открывается новым. Продолжить с перезаписью серверной "
+                       "копии? Изменения с сервера могут быть потеряны."):
+                password = self._pending_change_password
+                self.set_status("Смена мастер-пароля и синхронизация...")
+                self._change_worker = ChangePasswordWorker(
+                    self.manager, password, allow_overwrite=True)
+                self._change_worker.finished_ok.connect(self._on_change_done)
+                self._change_worker.start()
+            else:
+                notify(parent, "Смена мастер-пароля",
+                       "Смена пароля отменена: серверная копия не тронута.")
+                self.set_status("Смена мастер-пароля отменена.")
+            return
         if result.remote_available:
             notify(parent, "Мастер-пароль изменён", result.message)
             self.set_status("✓ " + result.message)
@@ -786,6 +821,48 @@ class MainWindow(QMainWindow):
             self.set_status("• " + result.message)
 
     # ------------------------------------------------------------------
+    # Слияние с серверной копией под другим мастер-паролем
+    # ------------------------------------------------------------------
+    def _offer_adopt_remote(self) -> None:
+        """Просит новый мастер-пароль и сливает серверные данные с локальными."""
+        if self._adopt_dialog_open:
+            return
+        for worker in (self._adopt_worker, self._change_worker):
+            if worker is not None and worker.is_running():
+                return
+        self._adopt_prompted = True
+        self._adopt_dialog_open = True
+        parent = QApplication.activeModalWidget() or self
+        try:
+            dlg = AdoptRemotePasswordDialog(parent=parent)
+            if not dlg.exec():
+                self.set_status(
+                    "• Синхронизация приостановлена: удалённая копия "
+                    "зашифрована другим мастер-паролем.")
+                return
+            password = dlg.password
+        finally:
+            self._adopt_dialog_open = False
+        self.set_status("Синхронизация и объединение данных...")
+        self._adopt_worker = AdoptRemoteWorker(self.manager, password)
+        self._adopt_worker.finished_ok.connect(self._on_adopt_done)
+        self._adopt_worker.start()
+
+    def _on_adopt_done(self, result: SyncResult) -> None:
+        self.refresh_services()
+        parent = QApplication.activeModalWidget() or self
+        if result.ok:
+            notify(parent, "Синхронизация", result.message)
+            self.set_status("✓ " + result.message)
+        else:
+            notify(parent, "Синхронизация", result.message, QMessageBox.Warning)
+            self.set_status("• " + result.message)
+            # Неверный пароль — разрешаем повторить запрос при следующей
+            # автоматической синхронизации.
+            if result.password_mismatch:
+                self._adopt_prompted = False
+
+    # ------------------------------------------------------------------
     # Синхронизация
     # ------------------------------------------------------------------
     def start_sync(self, manual: bool = False) -> None:
@@ -793,10 +870,15 @@ class MainWindow(QMainWindow):
             if manual:
                 self.set_status("Смена мастер-пароля уже выполняется...")
             return
+        if self._adopt_worker is not None and self._adopt_worker.is_running():
+            if manual:
+                self.set_status("Слияние с серверной копией уже выполняется...")
+            return
         if self._sync_worker is not None and self._sync_worker.isRunning():
             if manual:
                 self.set_status("Синхронизация уже выполняется...")
             return
+        self._sync_manual = manual
         self.set_status("Синхронизация...")
         self._sync_worker = SyncWorker(self.manager)
         self._sync_worker.finished_ok.connect(self._on_sync_done)
@@ -811,7 +893,7 @@ class MainWindow(QMainWindow):
         # Работающие фоновые задачи — демон-потоки, поэтому не мешают выходу.
         # Даём им короткий шанс завершиться, но не блокируем закрытие.
         for worker in (self._sync_worker, self._check_worker,
-                       self._change_worker):
+                       self._change_worker, self._adopt_worker):
             if worker is not None and worker.is_running():
                 worker.wait(1000)
         self.manager.save_local()
@@ -824,6 +906,12 @@ class MainWindow(QMainWindow):
         else:
             prefix = "• "
         self.set_status(prefix + result.message)
+        # Серверная копия под другим мастер-паролем: предлагаем ввести его и
+        # слить данные. При автоматической синхронизации — один раз за запуск,
+        # при ручной — каждый раз.
+        if result.password_mismatch and (self._sync_manual
+                                         or not self._adopt_prompted):
+            self._offer_adopt_remote()
 
     # ------------------------------------------------------------------
     # Статус

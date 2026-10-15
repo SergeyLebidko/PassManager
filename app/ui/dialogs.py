@@ -360,6 +360,66 @@ class ChangeMasterPasswordDialog(QDialog):
         self.accept()
 
 
+class AdoptRemotePasswordDialog(QDialog):
+    """Запрос нового мастер-пароля удалённой копии для слияния данных.
+
+    Показывается, когда серверная копия зашифрована другим мастер-паролем:
+    пользователь вводит пароль, которым открывается сервер, после чего это
+    устройство объединяет данные и переходит на тот же пароль.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.password = ""
+        self.setWindowTitle("Синхронизация")
+        self.setMinimumWidth(480)
+
+        layout = QVBoxLayout(self)
+        title = QLabel("Нужен новый мастер-пароль")
+        title.setObjectName("titleLabel")
+        layout.addWidget(title)
+
+        hint = QLabel(
+            "Удалённая копия зашифрована другим мастер-паролем — видимо, "
+            "пароль сменили на другом устройстве. Введите новый мастер-пароль: "
+            "это устройство прочитает серверные данные, объединит их со своими "
+            "и перейдёт на тот же пароль."
+        )
+        hint.setObjectName("subtitleLabel")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        form = QFormLayout()
+        self.field = QLineEdit()
+        self.field.setEchoMode(QLineEdit.Password)
+        form.addRow("Новый мастер-пароль:", self.field)
+        layout.addLayout(form)
+
+        self.error = QLabel("")
+        self.error.setStyleSheet("color:#d64545;")
+        self.error.setWordWrap(True)
+        layout.addWidget(self.error)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Синхронизировать")
+        buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        set_box_icons(buttons, {
+            QDialogButtonBox.Ok: "check",
+            QDialogButtonBox.Cancel: "close",
+        })
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        QTimer.singleShot(50, self.field.setFocus)
+
+    def _accept(self) -> None:
+        if not self.field.text():
+            self.error.setText("Введите мастер-пароль.")
+            return
+        self.password = self.field.text()
+        self.accept()
+
+
 # --------------------------------------------------------------------------
 # Выбор иконки
 # --------------------------------------------------------------------------
