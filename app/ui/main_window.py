@@ -723,7 +723,6 @@ class MainWindow(QMainWindow):
             self.manager.webdav_url,
             self.manager.config.get("webdav_login", ""),
             self.manager.server_password(),
-            self.manager.config.get("autosync", True),
             parent=self,
         )
         dlg.test_btn.clicked.connect(lambda: self._test_connection(dlg))
@@ -733,9 +732,15 @@ class MainWindow(QMainWindow):
             values = dlg.values()
             self.manager.update_server_settings(
                 values["url"], values["login"], values["password"])
-            self.manager.config["autosync"] = values["autosync"]
             storage.save_config(self.manager.config)
-            self.set_status("Настройки сохранены.")
+            # Как только адрес сервера задан — сразу проверяем креды и
+            # обмениваемся копиями (кнопка «Проверить подключение» данные не
+            # трогает).
+            if self.manager.webdav_url.strip():
+                self.set_status("Настройки сохранены. Синхронизация...")
+                self.start_sync(manual=True)
+            else:
+                self.set_status("Настройки сохранены.")
 
     def _test_connection(self, dlg: SettingsDialog) -> None:
         values = dlg.values()
@@ -886,8 +891,7 @@ class MainWindow(QMainWindow):
 
     def _schedule_sync(self) -> None:
         """Отложенная фоновая синхронизация после изменения данных."""
-        if self.manager.autosync_enabled():
-            QTimer.singleShot(300, lambda: self.start_sync(manual=False))
+        QTimer.singleShot(300, lambda: self.start_sync(manual=False))
 
     def closeEvent(self, event) -> None:  # noqa: N802
         # Работающие фоновые задачи — демон-потоки, поэтому не мешают выходу.

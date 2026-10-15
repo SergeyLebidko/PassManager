@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -801,7 +800,7 @@ class HistoryDialog(QDialog):
 # --------------------------------------------------------------------------
 
 class SettingsDialog(QDialog):
-    def __init__(self, url: str, login: str, password: str, autosync: bool,
+    def __init__(self, url: str, login: str, password: str,
                  parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Настройки")
@@ -817,12 +816,9 @@ class SettingsDialog(QDialog):
         self.url.setPlaceholderText("https://server/webdav/PassManager")
         self.login = QLineEdit(login)
         self.password = CopyableField(password, masked=True)
-        self.autosync = QCheckBox("Автоматически синхронизировать при сохранении")
-        self.autosync.setChecked(autosync)
         form.addRow("Адрес каталога:", self.url)
         form.addRow("Логин сервера:", self.login)
         form.addRow("Пароль сервера:", self.password)
-        form.addRow("", self.autosync)
         layout.addLayout(form)
 
         hint = QLabel(
@@ -920,7 +916,6 @@ class SettingsDialog(QDialog):
             "url": self.url.text().strip(),
             "login": self.login.text().strip(),
             "password": self.password.text(),
-            "autosync": self.autosync.isChecked(),
         }
 
     def stop_check_worker(self) -> None:
