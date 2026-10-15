@@ -359,9 +359,6 @@ class Manager:
             return None
 
     # ---- вспомогательное ---------------------------------------------
-    def autosync_enabled(self) -> bool:
-        return bool(self.config.get("autosync", True))
-
     def set_password(self, password: str) -> None:
         self._current_password = password
 
