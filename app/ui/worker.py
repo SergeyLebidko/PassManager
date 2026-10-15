@@ -101,6 +101,21 @@ class SyncWorker(BackgroundWorker):
         self.finished_ok.emit(result)
 
 
+class ChangePasswordWorker(BackgroundWorker):
+    """Меняет мастер-пароль в фоне: синхронизация, перешифровка, перезалив."""
+
+    finished_ok = Signal(object)
+
+    def __init__(self, manager: Manager, new_password: str, parent=None) -> None:
+        super().__init__(parent)
+        self.manager = manager
+        self.new_password = new_password
+
+    def run(self) -> None:
+        result = self.manager.change_master_password(self.new_password)
+        self.finished_ok.emit(result)
+
+
 class CheckWorker(BackgroundWorker):
     """Проверка подключения к WebDAV в фоне с пошаговым логом.
 
