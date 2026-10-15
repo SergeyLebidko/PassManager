@@ -106,13 +106,31 @@ class ChangePasswordWorker(BackgroundWorker):
 
     finished_ok = Signal(object)
 
+    def __init__(self, manager: Manager, new_password: str,
+                 allow_overwrite: bool = False, parent=None) -> None:
+        super().__init__(parent)
+        self.manager = manager
+        self.new_password = new_password
+        self.allow_overwrite = allow_overwrite
+
+    def run(self) -> None:
+        result = self.manager.change_master_password(
+            self.new_password, self.allow_overwrite)
+        self.finished_ok.emit(result)
+
+
+class AdoptRemoteWorker(BackgroundWorker):
+    """Переходит на мастер-пароль удалённой копии и сливает данные в фоне."""
+
+    finished_ok = Signal(object)
+
     def __init__(self, manager: Manager, new_password: str, parent=None) -> None:
         super().__init__(parent)
         self.manager = manager
         self.new_password = new_password
 
     def run(self) -> None:
-        result = self.manager.change_master_password(self.new_password)
+        result = self.manager.adopt_remote(self.new_password)
         self.finished_ok.emit(result)
 
 

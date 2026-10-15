@@ -661,6 +661,228 @@ def test_manager_change_master_password_rejects_empty() -> None:
             storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
 
 
+class _FakeServer:
+    """Мини-WebDAV в памяти: общий «сервер» для двух устройств."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    def make_client(self):
+        store = self.store
+
+        class _Client:
+            def check(self) -> bool:
+                return storage.REMOTE_FILENAME in store
+
+            def ensure_dirs(self) -> None:
+                pass
+
+            def download(self, name: str):
+                return store.get(name)
+
+            def upload(self, name: str, text: str) -> None:
+                store[name] = text
+
+        return _Client()
+
+
+def _seed_vault(manager: Manager, name: str = "Общее") -> None:
+    svc = Service(name=name)
+    svc.accounts.append(Account(title="база", login="u@mail", password="p"))
+    manager.vault.add_service(svc)
+    manager.save_local()
+
+
+def test_manager_adopt_remote_merges() -> None:
+    """Устройство со старым паролем принимает новый и сливает данные."""
+    server = _FakeServer()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE
+        a_dir = Path(tmp) / "a"
+        b_dir = Path(tmp) / "b"
+        a_dir.mkdir()
+        b_dir.mkdir()
+        try:
+            # --- устройство A: общая база, затем смена пароля и правка ---
+            storage.VAULT_FILE = a_dir / "vault.txt"
+            storage.CONFIG_FILE = a_dir / "config.json"
+            a = Manager()
+            a._client = server.make_client  # type: ignore[method-assign]
+            a.create_new("old-pass")
+            a.set_password("old-pass")
+            _seed_vault(a)
+            a.try_sync()  # на сервере появилась общая база
+            base = a.vault.to_dict()
+
+            a.change_master_password("new-pass")
+            a.vault.add_service(Service(name="От A"))
+            a.save_local()
+            a.try_sync()
+            assert a.check_password("new-pass")
+
+            # --- устройство B: старая база, ещё со старым паролем ---
+            storage.VAULT_FILE = b_dir / "vault.txt"
+            storage.CONFIG_FILE = b_dir / "config.json"
+            b = Manager()
+            b._client = server.make_client  # type: ignore[method-assign]
+            b.create_new("old-pass")
+            b.set_password("old-pass")
+            b.vault = Vault.from_dict(base)
+            b.save_local()
+            b.vault.add_service(Service(name="От B"))
+            b.save_local()
+
+            # Синхронизация обнаруживает расхождение, но ничего не затирает.
+            mismatch = b.try_sync()
+            assert mismatch.password_mismatch
+            assert not mismatch.ok
+            assert b.check_password("old-pass")
+
+            # Ввод нового пароля приводит к слиянию, а не к перезаписи.
+            adopted = b.adopt_remote("new-pass")
+            assert adopted.ok, adopted.message
+            assert b.check_password("new-pass")
+            assert not b.check_password("old-pass")
+
+            remote = storage.decrypt_vault_text(
+                "new-pass", server.store[storage.REMOTE_FILENAME])
+            names = {s.name for s in remote.services}
+            assert names == {"Общее", "От A", "От B"}, names
+        finally:
+            storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
+
+
+def test_manager_adopt_remote_rejects_wrong_password() -> None:
+    server = _FakeServer()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE
+        storage.VAULT_FILE = Path(tmp) / "a.txt"
+        storage.CONFIG_FILE = Path(tmp) / "a.json"
+        try:
+            a = Manager()
+            a._client = server.make_client  # type: ignore[method-assign]
+            a.create_new("new-pass")
+            a.set_password("new-pass")
+            _seed_vault(a)
+            a.try_sync()
+
+            b_dir = Path(tmp) / "b"
+            b_dir.mkdir()
+            storage.VAULT_FILE = b_dir / "vault.txt"
+            storage.CONFIG_FILE = b_dir / "config.json"
+            b = Manager()
+            b._client = server.make_client  # type: ignore[method-assign]
+            b.create_new("old-pass")
+            b.set_password("old-pass")
+
+            bad = b.adopt_remote("неверный")
+            assert not bad.ok
+            assert bad.password_mismatch
+            # Пароль и локальные данные не изменились.
+            assert b.check_password("old-pass")
+            assert "От" not in {s.name for s in b.vault.services}
+        finally:
+            storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
+
+
+def test_manager_change_master_password_merges_when_new_matches_remote() -> None:
+    """Смена на пароль, которым открывается сервер, проходит без перезаписи."""
+    server = _FakeServer()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE
+        a_dir = Path(tmp) / "a"
+        b_dir = Path(tmp) / "b"
+        a_dir.mkdir()
+        b_dir.mkdir()
+        try:
+            storage.VAULT_FILE = a_dir / "vault.txt"
+            storage.CONFIG_FILE = a_dir / "config.json"
+            a = Manager()
+            a._client = server.make_client  # type: ignore[method-assign]
+            a.create_new("old-pass")
+            a.set_password("old-pass")
+            _seed_vault(a)
+            a.try_sync()
+            base = a.vault.to_dict()
+            a.change_master_password("new-pass")
+            a.vault.add_service(Service(name="От A"))
+            a.save_local()
+            a.try_sync()
+
+            storage.VAULT_FILE = b_dir / "vault.txt"
+            storage.CONFIG_FILE = b_dir / "config.json"
+            b = Manager()
+            b._client = server.make_client  # type: ignore[method-assign]
+            b.create_new("old-pass")
+            b.set_password("old-pass")
+            b.vault = Vault.from_dict(base)
+            b.save_local()
+            b.vault.add_service(Service(name="От B"))
+            b.save_local()
+
+            result = b.change_master_password("new-pass")
+            assert result.ok, result.message
+            assert not result.needs_overwrite
+            assert b.check_password("new-pass")
+
+            remote = storage.decrypt_vault_text(
+                "new-pass", server.store[storage.REMOTE_FILENAME])
+            names = {s.name for s in remote.services}
+            assert names == {"Общее", "От A", "От B"}, names
+        finally:
+            storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
+
+
+def test_manager_change_master_password_asks_before_overwrite() -> None:
+    """Если сервер не открывается ни старым, ни новым паролем — нужен запрос."""
+    server = _FakeServer()
+    with tempfile.TemporaryDirectory() as tmp:
+        old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE
+        a_dir = Path(tmp) / "a"
+        b_dir = Path(tmp) / "b"
+        a_dir.mkdir()
+        b_dir.mkdir()
+        try:
+            storage.VAULT_FILE = a_dir / "vault.txt"
+            storage.CONFIG_FILE = a_dir / "config.json"
+            a = Manager()
+            a._client = server.make_client  # type: ignore[method-assign]
+            a.create_new("old-pass")
+            a.set_password("old-pass")
+            _seed_vault(a)
+            a.try_sync()
+            base = a.vault.to_dict()
+            a.change_master_password("remote-pass")
+            server_before = dict(server.store)
+
+            storage.VAULT_FILE = b_dir / "vault.txt"
+            storage.CONFIG_FILE = b_dir / "config.json"
+            b = Manager()
+            b._client = server.make_client  # type: ignore[method-assign]
+            b.create_new("old-pass")
+            b.set_password("old-pass")
+            b.vault = Vault.from_dict(base)
+            b.save_local()
+
+            # Новый пароль не открывает сервер — требуется подтверждение,
+            # при этом ничего не меняется.
+            result = b.change_master_password("third-pass")
+            assert not result.ok
+            assert result.needs_overwrite
+            assert b.check_password("old-pass")
+            assert server.store == server_before
+
+            # С подтверждением — смена проходит и сервер перезаписывается.
+            forced = b.change_master_password("third-pass", allow_overwrite=True)
+            assert forced.ok, forced.message
+            assert b.check_password("third-pass")
+            remote = storage.decrypt_vault_text(
+                "third-pass", server.store[storage.REMOTE_FILENAME])
+            assert {s.name for s in remote.services} == {"Общее"}
+        finally:
+            storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
+
+
 def run_all() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

@@ -25,6 +25,10 @@ class SyncResult:
     remote_available: bool
     message: str
     changed: bool = False
+    # Удалённая копия зашифрована другим мастер-паролем: нужно спросить новый.
+    password_mismatch: bool = False
+    # Смена пароля упрётся в перезапись сервера — требуется подтверждение.
+    needs_overwrite: bool = False
 
 
 class Manager:
@@ -119,12 +123,23 @@ class Manager:
     def _sync(self) -> SyncResult:
         client = self._client()
 
-        # После смены мастер-пароля удалённая копия зашифрована старым
-        # паролем, и расшифровать её нельзя. Просто перезаливаем локальную
-        # копию (она уже перешифрована новым паролем) и снимаем отметку.
+        # После смены мастер-пароля удалённая копия обычно зашифрована старым
+        # паролем, и расшифровать её нельзя. Пробуем прочитать её текущим
+        # (новым) паролем: если удалось — сливаем, иначе перезаливаем локальную
+        # копию (она уже содержит актуальные данные) и снимаем отметку.
         if self.config.get("pending_reencrypt"):
             client.ensure_dirs()
+            remote_text = client.download(storage.REMOTE_FILENAME)
             with self._lock:
+                if remote_text:
+                    try:
+                        remote_vault = storage.decrypt_vault_text(
+                            self._current_password, remote_text)
+                    except crypto.CryptoError:
+                        remote_vault = None
+                    if remote_vault is not None:
+                        self.vault = merge(self.vault, remote_vault)
+                self.save_local()
                 local_text = self._encrypted_local_text()
             client.upload(storage.REMOTE_FILENAME, local_text)
             self.config.pop("pending_reencrypt", None)
@@ -158,10 +173,12 @@ class Manager:
             remote_vault = storage.decrypt_vault_text(self._current_password, remote_text)
         except crypto.CryptoError:
             # Не удалось расшифровать (иной мастер-пароль) - не затираем сервер.
+            # Интерфейс предложит ввести новый пароль и слить копии (adopt_remote).
             return SyncResult(
                 False, True,
                 "Удалённая копия зашифрована другим мастер-паролем. "
-                "Синхронизация пропущена для защиты данных.")
+                "Синхронизация пропущена для защиты данных.",
+                password_mismatch=True)
 
         # Короткая критическая секция: слияние и локальная запись.
         with self._lock:
@@ -184,27 +201,54 @@ class Manager:
         except Exception:  # noqa: BLE001 - проверка не должна падать
             return False
 
-    def change_master_password(self, new_password: str) -> SyncResult:
+    def change_master_password(self, new_password: str,
+                               allow_overwrite: bool = False) -> SyncResult:
         """Меняет мастер-пароль, перешифровывая хранилище и пароль сервера.
 
         Порядок действий:
         1. синхронизация под старым паролем (best effort) — чтобы слить
            возможные правки с сервера;
-        2. перешифровка локального ``vault.txt`` и пароля WebDAV новым ключом;
-        3. перезалив перешифрованной копии на сервер.
+        2. если серверная копия зашифрована другим паролем, пробуем прочитать
+           её НОВЫМ паролем и слить — тогда ничего не перезаписывается;
+        3. перешифровка локального ``vault.txt`` и пароля WebDAV новым ключом;
+        4. перезалив копии на сервер.
 
-        Если сервер недоступен, смена всё равно выполняется локально, а
-        удалённая копия обновляется при первой же удачной синхронизации
-        (флаг ``pending_reencrypt``).
+        Если прочитать серверную копию новым паролем не удалось, смена
+        отменяется и возвращается результат с ``needs_overwrite=True``:
+        вызывающий код должен подтвердить перезапись сервера и вызвать метод
+        повторно с ``allow_overwrite=True``.
+
+        Если сервер недоступен, смена выполняется локально, а удалённая копия
+        обновляется при первой же удачной синхронизации (флаг
+        ``pending_reencrypt``).
         """
         if not new_password:
             return SyncResult(False, False,
                               "Новый мастер-пароль не может быть пустым.")
 
         # 1) Слияние с сервером под старым паролем (сервер может быть недоступен).
-        self.try_sync()
+        pre = self.try_sync()
 
-        # 2) Перешифровка локальных данных. Пароль WebDAV тоже зашифрован
+        # 2) Серверная копия под другим паролем? Пробуем прочитать её новым.
+        if pre.password_mismatch:
+            try:
+                remote_vault = self._read_remote_with(new_password)
+            except WebDAVError as exc:
+                return SyncResult(
+                    False, True,
+                    "Не удалось прочитать удалённую копию: " + str(exc),
+                    password_mismatch=True)
+            if remote_vault is not None:
+                # Сливаем серверные данные в локальную копию — без вытеснения.
+                self.vault = merge(self.vault, remote_vault)
+            elif not allow_overwrite:
+                return SyncResult(
+                    False, True,
+                    "Удалённая копия зашифрована другим мастер-паролем и не "
+                    "открывается новым. Продолжение перезапишет серверную копию.",
+                    password_mismatch=True, needs_overwrite=True)
+
+        # 3) Перешифровка локальных данных. Пароль WebDAV тоже зашифрован
         #    мастер-ключом, поэтому сначала читаем его старым ключом.
         with self._lock:
             server_password = self.server_password()
@@ -217,7 +261,7 @@ class Manager:
             self.save_local()
             local_text = self._encrypted_local_text()
 
-        # 3) Заливаем перешифрованную копию на сервер.
+        # 4) Заливаем перешифрованную копию на сервер.
         try:
             client = self._client()
             client.ensure_dirs()
@@ -240,6 +284,79 @@ class Manager:
         self.config.pop("pending_reencrypt", None)
         storage.save_config(self.config)
         return SyncResult(True, True, "Мастер-пароль изменён и синхронизирован.")
+
+    def adopt_remote(self, new_password: str) -> SyncResult:
+        """Переходит на мастер-пароль удалённой копии и сливает данные.
+
+        Используется, когда серверная копия зашифрована другим мастер-паролем:
+        чтобы не перезаписывать её, читаем её ``new_password``, объединяем с
+        локальной копией и переводим это устройство на тот же пароль.
+        """
+        if not new_password:
+            return SyncResult(False, False, "Мастер-пароль не может быть пустым.")
+        try:
+            client = self._client()
+        except WebDAVError as exc:
+            return SyncResult(False, False, str(exc))
+        try:
+            remote_text = client.download(storage.REMOTE_FILENAME)
+        except WebDAVError as exc:
+            return SyncResult(
+                False, True, "Не удалось скачать удалённую копию: " + str(exc),
+                password_mismatch=True)
+        if remote_text is None:
+            return SyncResult(
+                False, True, "Удалённая копия не найдена.",
+                password_mismatch=True)
+        try:
+            remote_vault = storage.decrypt_vault_text(new_password, remote_text)
+        except crypto.CryptoError:
+            return SyncResult(
+                False, True, "Неверный мастер-пароль удалённой копии.",
+                password_mismatch=True)
+
+        with self._lock:
+            server_password = self.server_password()
+            self.salt = crypto.new_salt()
+            self.key = crypto.derive_key(new_password, self.salt, self.iterations)
+            self._current_password = new_password
+            self.vault = merge(self.vault, remote_vault)
+            self.config = storage.encrypt_server_password(
+                {**self.config, "webdav_password": server_password}, self.key)
+            storage.save_config(self.config)
+            self.save_local()
+            local_text = self._encrypted_local_text()
+
+        try:
+            client.ensure_dirs()
+            client.upload(storage.REMOTE_FILENAME, local_text)
+        except WebDAVError as exc:
+            self.config["pending_reencrypt"] = True
+            storage.save_config(self.config)
+            return SyncResult(
+                True, False,
+                "Данные объединены, но залить на сервер не удалось: " + str(exc))
+        except Exception as exc:  # noqa: BLE001 - не роняем программу
+            self.config["pending_reencrypt"] = True
+            storage.save_config(self.config)
+            return SyncResult(
+                False, False,
+                "Данные объединены, но при заливке произошла ошибка: " + str(exc))
+
+        self.config.pop("pending_reencrypt", None)
+        storage.save_config(self.config)
+        return SyncResult(True, True, "Данные объединены с серверной копией.")
+
+    def _read_remote_with(self, password: str) -> "Vault | None":
+        """Читает удалённую копию указанным паролем (None — нет/не открылась)."""
+        client = self._client()
+        remote_text = client.download(storage.REMOTE_FILENAME)
+        if remote_text is None:
+            return None
+        try:
+            return storage.decrypt_vault_text(password, remote_text)
+        except crypto.CryptoError:
+            return None
 
     # ---- вспомогательное ---------------------------------------------
     def autosync_enabled(self) -> bool:
