@@ -278,6 +278,89 @@ class MasterPasswordDialog(QDialog):
 
 
 # --------------------------------------------------------------------------
+# Смена мастер-пароля
+# --------------------------------------------------------------------------
+
+class ChangeMasterPasswordDialog(QDialog):
+    """Смена мастер-пароля: текущий, новый и повтор.
+
+    ``password_check`` — функция ``(str) -> bool``, которой проверяется
+    текущий мастер-пароль. Под-диалог открывается из «Настроек».
+    """
+
+    def __init__(self, password_check, parent=None) -> None:
+        super().__init__(parent)
+        self.password_check = password_check
+        self.new_password = ""
+        self.setWindowTitle("Смена мастер-пароля")
+        self.setMinimumWidth(460)
+
+        layout = QVBoxLayout(self)
+        title = QLabel("Смена мастер-пароля")
+        title.setObjectName("titleLabel")
+        layout.addWidget(title)
+
+        hint = QLabel(
+            "Мастер-пароль защищает все данные. Смените его и на остальных "
+            "устройствах — иначе они не смогут прочитать синхронизированную "
+            "копию."
+        )
+        hint.setObjectName("subtitleLabel")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        form = QFormLayout()
+        self.current = QLineEdit()
+        self.current.setEchoMode(QLineEdit.Password)
+        self.new1 = QLineEdit()
+        self.new1.setEchoMode(QLineEdit.Password)
+        self.new2 = QLineEdit()
+        self.new2.setEchoMode(QLineEdit.Password)
+        form.addRow("Текущий пароль:", self.current)
+        form.addRow("Новый пароль:", self.new1)
+        form.addRow("Повторите новый:", self.new2)
+        layout.addLayout(form)
+
+        self.error = QLabel("")
+        self.error.setStyleSheet("color:#d64545;")
+        self.error.setWordWrap(True)
+        layout.addWidget(self.error)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Сменить")
+        buttons.button(QDialogButtonBox.Cancel).setText("Отмена")
+        set_box_icons(buttons, {
+            QDialogButtonBox.Ok: "check",
+            QDialogButtonBox.Cancel: "close",
+        })
+        buttons.accepted.connect(self._accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        QTimer.singleShot(50, self.current.setFocus)
+
+    def _accept(self) -> None:
+        current = self.current.text()
+        new = self.new1.text()
+        if not current:
+            self.error.setText("Введите текущий мастер-пароль.")
+            return
+        if not self.password_check or not self.password_check(current):
+            self.error.setText("Неверный текущий мастер-пароль.")
+            return
+        if len(new) < 6:
+            self.error.setText("Новый мастер-пароль должен быть не короче 6 символов.")
+            return
+        if new != self.new2.text():
+            self.error.setText("Новые пароли не совпадают.")
+            return
+        if new == current:
+            self.error.setText("Новый пароль совпадает с текущим.")
+            return
+        self.new_password = new
+        self.accept()
+
+
+# --------------------------------------------------------------------------
 # Выбор иконки
 # --------------------------------------------------------------------------
 
@@ -690,6 +773,26 @@ class SettingsDialog(QDialog):
         hint.setObjectName("subtitleLabel")
         hint.setWordWrap(True)
         layout.addWidget(hint)
+
+        # --- блок смены мастер-пароля ---
+        layout.addSpacing(4)
+        mp_title = QLabel("Мастер-пароль")
+        mp_title.setObjectName("titleLabel")
+        layout.addWidget(mp_title)
+        mp_hint = QLabel(
+            "Мастер-пароль шифрует хранилище и пароль сервера. Меняйте его "
+            "на каждом устройстве."
+        )
+        mp_hint.setObjectName("subtitleLabel")
+        mp_hint.setWordWrap(True)
+        layout.addWidget(mp_hint)
+
+        mp_row = QHBoxLayout()
+        self.change_password_btn = text_icon_button(
+            "key", "Сменить мастер-пароль…")
+        mp_row.addWidget(self.change_password_btn, 0, Qt.AlignVCenter)
+        mp_row.addStretch(1)
+        layout.addLayout(mp_row)
 
         # --- блок проверки подключения ---
         self.progress = QProgressBar()

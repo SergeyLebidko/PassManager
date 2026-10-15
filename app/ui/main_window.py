@@ -40,6 +40,7 @@ from .icons import make_icon
 from .widgets import IconColorButton
 from .dialogs import (
     AccountDialog,
+    ChangeMasterPasswordDialog,
     HistoryDialog,
     MasterPasswordDialog,
     ServiceDialog,
@@ -49,7 +50,7 @@ from .dialogs import (
     copy_to_clipboard,
     notify,
 )
-from .worker import CheckWorker, SyncWorker
+from .worker import ChangePasswordWorker, CheckWorker, SyncWorker
 
 
 class MainWindow(QMainWindow):
@@ -60,6 +61,7 @@ class MainWindow(QMainWindow):
         self.dark = False
         self._sync_worker: SyncWorker | None = None
         self._check_worker: CheckWorker | None = None
+        self._change_worker: ChangePasswordWorker | None = None
         # Текущее состояние сортировки (в памяти окна, не синхронизируется).
         # По умолчанию — по алфавиту А→Я.
         self._service_sort_desc = False
@@ -710,6 +712,8 @@ class MainWindow(QMainWindow):
             parent=self,
         )
         dlg.test_btn.clicked.connect(lambda: self._test_connection(dlg))
+        dlg.change_password_btn.clicked.connect(
+            lambda: self.change_master_password(dlg))
         if dlg.exec():
             values = dlg.values()
             self.manager.update_server_settings(
@@ -745,9 +749,50 @@ class MainWindow(QMainWindow):
         worker.start()
 
     # ------------------------------------------------------------------
+    # Смена мастер-пароля
+    # ------------------------------------------------------------------
+    def change_master_password(self, parent=None) -> None:
+        """Открывает под-диалог и запускает фоновую смену мастер-пароля."""
+        ui_parent = parent or self
+        if self._change_worker is not None and self._change_worker.is_running():
+            notify(ui_parent, "PassManager",
+                   "Смена мастер-пароля уже выполняется.")
+            return
+        if self._sync_worker is not None and self._sync_worker.isRunning():
+            notify(ui_parent, "PassManager",
+                   "Дождитесь окончания синхронизации и попробуйте снова.")
+            return
+        dlg = ChangeMasterPasswordDialog(self.manager.check_password,
+                                         parent=ui_parent)
+        if not dlg.exec():
+            return
+        self.set_status("Смена мастер-пароля и синхронизация...")
+        self._change_worker = ChangePasswordWorker(
+            self.manager, dlg.new_password)
+        self._change_worker.finished_ok.connect(self._on_change_done)
+        self._change_worker.start()
+
+    def _on_change_done(self, result: SyncResult) -> None:
+        self.refresh_services()
+        # «Настройки» могут быть ещё открыты — показываем окно поверх активного
+        # модального диалога, а если его нет — поверх главного окна.
+        parent = QApplication.activeModalWidget() or self
+        if result.remote_available:
+            notify(parent, "Мастер-пароль изменён", result.message)
+            self.set_status("✓ " + result.message)
+        else:
+            notify(parent, "Мастер-пароль изменён",
+                   result.message, QMessageBox.Warning)
+            self.set_status("• " + result.message)
+
+    # ------------------------------------------------------------------
     # Синхронизация
     # ------------------------------------------------------------------
     def start_sync(self, manual: bool = False) -> None:
+        if self._change_worker is not None and self._change_worker.is_running():
+            if manual:
+                self.set_status("Смена мастер-пароля уже выполняется...")
+            return
         if self._sync_worker is not None and self._sync_worker.isRunning():
             if manual:
                 self.set_status("Синхронизация уже выполняется...")
@@ -765,7 +810,8 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         # Работающие фоновые задачи — демон-потоки, поэтому не мешают выходу.
         # Даём им короткий шанс завершиться, но не блокируем закрытие.
-        for worker in (self._sync_worker, self._check_worker):
+        for worker in (self._sync_worker, self._check_worker,
+                       self._change_worker):
             if worker is not None and worker.is_running():
                 worker.wait(1000)
         self.manager.save_local()

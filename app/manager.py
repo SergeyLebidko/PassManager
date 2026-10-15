@@ -118,6 +118,21 @@ class Manager:
 
     def _sync(self) -> SyncResult:
         client = self._client()
+
+        # После смены мастер-пароля удалённая копия зашифрована старым
+        # паролем, и расшифровать её нельзя. Просто перезаливаем локальную
+        # копию (она уже перешифрована новым паролем) и снимаем отметку.
+        if self.config.get("pending_reencrypt"):
+            client.ensure_dirs()
+            with self._lock:
+                local_text = self._encrypted_local_text()
+            client.upload(storage.REMOTE_FILENAME, local_text)
+            self.config.pop("pending_reencrypt", None)
+            storage.save_config(self.config)
+            return SyncResult(
+                True, True,
+                "Удалённая копия обновлена после смены мастер-пароля.")
+
         # check() возвращает False только для отсутствующего каталога (404).
         # Ошибки соединения/авторизации выбрасывают WebDAVError и обрабатываются
         # в try_sync как «сервер недоступен».
@@ -158,6 +173,73 @@ class Manager:
         # Сеть - вне блокировки.
         client.upload(storage.REMOTE_FILENAME, local_text)
         return SyncResult(True, True, "Данные синхронизированы.")
+
+    # ---- смена мастер-пароля ------------------------------------------
+    def check_password(self, password: str) -> bool:
+        """Верен ли текущий мастер-пароль разблокированного хранилища."""
+        if not password or not self.key:
+            return False
+        try:
+            return crypto.derive_key(password, self.salt, self.iterations) == self.key
+        except Exception:  # noqa: BLE001 - проверка не должна падать
+            return False
+
+    def change_master_password(self, new_password: str) -> SyncResult:
+        """Меняет мастер-пароль, перешифровывая хранилище и пароль сервера.
+
+        Порядок действий:
+        1. синхронизация под старым паролем (best effort) — чтобы слить
+           возможные правки с сервера;
+        2. перешифровка локального ``vault.txt`` и пароля WebDAV новым ключом;
+        3. перезалив перешифрованной копии на сервер.
+
+        Если сервер недоступен, смена всё равно выполняется локально, а
+        удалённая копия обновляется при первой же удачной синхронизации
+        (флаг ``pending_reencrypt``).
+        """
+        if not new_password:
+            return SyncResult(False, False,
+                              "Новый мастер-пароль не может быть пустым.")
+
+        # 1) Слияние с сервером под старым паролем (сервер может быть недоступен).
+        self.try_sync()
+
+        # 2) Перешифровка локальных данных. Пароль WebDAV тоже зашифрован
+        #    мастер-ключом, поэтому сначала читаем его старым ключом.
+        with self._lock:
+            server_password = self.server_password()
+            self.salt = crypto.new_salt()
+            self.key = crypto.derive_key(new_password, self.salt, self.iterations)
+            self._current_password = new_password
+            self.config = storage.encrypt_server_password(
+                {**self.config, "webdav_password": server_password}, self.key)
+            storage.save_config(self.config)
+            self.save_local()
+            local_text = self._encrypted_local_text()
+
+        # 3) Заливаем перешифрованную копию на сервер.
+        try:
+            client = self._client()
+            client.ensure_dirs()
+            client.upload(storage.REMOTE_FILENAME, local_text)
+        except WebDAVError as exc:
+            self.config["pending_reencrypt"] = True
+            storage.save_config(self.config)
+            return SyncResult(
+                True, False,
+                "Мастер-пароль изменён. Удалённую копию залить не удалось, "
+                "она будет обновлена при следующей синхронизации: " + str(exc))
+        except Exception as exc:  # noqa: BLE001 - не роняем программу
+            self.config["pending_reencrypt"] = True
+            storage.save_config(self.config)
+            return SyncResult(
+                False, False,
+                "Мастер-пароль изменён, но при заливке на сервер произошла "
+                "ошибка: " + str(exc))
+
+        self.config.pop("pending_reencrypt", None)
+        storage.save_config(self.config)
+        return SyncResult(True, True, "Мастер-пароль изменён и синхронизирован.")
 
     # ---- вспомогательное ---------------------------------------------
     def autosync_enabled(self) -> bool:

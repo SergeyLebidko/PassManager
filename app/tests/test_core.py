@@ -587,6 +587,80 @@ def test_manager_unlock_flow() -> None:
             storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
 
 
+def test_manager_check_password() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE
+        storage.VAULT_FILE = Path(tmp) / "vault.txt"
+        storage.CONFIG_FILE = Path(tmp) / "config.json"
+        try:
+            m = Manager()
+            m.create_new("secret1")
+            assert m.check_password("secret1")
+            assert not m.check_password("wrong")
+            assert not m.check_password("")
+        finally:
+            storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
+
+
+def test_manager_change_master_password() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE
+        storage.VAULT_FILE = Path(tmp) / "vault.txt"
+        storage.CONFIG_FILE = Path(tmp) / "config.json"
+        try:
+            m = Manager()
+            m.create_new("old-pass")
+            m.set_password("old-pass")
+
+            svc = Service(name="Почта")
+            svc.accounts.append(
+                Account(title="A", login="u@mail", password="p"))
+            m.vault.add_service(svc)
+            m.save_local()
+            # Пароль WebDAV зашифрован мастер-ключом — проверяем, что выживет.
+            m.update_server_settings("", "user", "davpass")
+
+            # Сервер не задан — смена проходит локально.
+            result = m.change_master_password("new-pass")
+            assert result.ok
+            assert not result.remote_available
+            assert m.config.get("pending_reencrypt") is True
+
+            # Новый пароль работает, старый — уже нет.
+            assert m.check_password("new-pass")
+            assert not m.check_password("old-pass")
+            loaded, _key, _salt, _iters = storage.load_vault("new-pass")
+            assert loaded.services[0].name == "Почта"
+            assert loaded.services[0].accounts[0].login == "u@mail"
+            try:
+                storage.load_vault("old-pass")
+            except crypto.WrongPasswordError:
+                pass
+            else:
+                raise AssertionError("Старый пароль не должен открывать хранилище")
+
+            # Пароль сервера перешифрован новым ключом и читается.
+            assert m.server_password() == "davpass"
+        finally:
+            storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
+
+
+def test_manager_change_master_password_rejects_empty() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        old_vault, old_cfg = storage.VAULT_FILE, storage.CONFIG_FILE
+        storage.VAULT_FILE = Path(tmp) / "vault.txt"
+        storage.CONFIG_FILE = Path(tmp) / "config.json"
+        try:
+            m = Manager()
+            m.create_new("secret1")
+            result = m.change_master_password("")
+            assert not result.ok
+            # Пароль не сменился.
+            assert m.check_password("secret1")
+        finally:
+            storage.VAULT_FILE, storage.CONFIG_FILE = old_vault, old_cfg
+
+
 def run_all() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
