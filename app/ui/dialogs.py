@@ -905,6 +905,25 @@ class SettingsDialog(QDialog):
         self.log_view.clear()
         self.log_view.show()
         self.progress.show()
+        self._fit_log()
+
+    def _fit_log(self) -> None:
+        """Поднимает нижнюю границу окна, чтобы журнал не наползал на кнопки.
+
+        Журнал скрыт в обычном состоянии и потому не входит в минимальный
+        размер окна, а ``minimumSizeHint`` вдобавок занижает высоту меток с
+        переносом строк. Поэтому берём высоту через ``heightForWidth`` — она
+        учитывает и видимый журнал, и текущую ширину окна. Иначе на маленьком
+        или HiDPI-экране журнал выходил за границы, и кнопки рисовались поверх.
+        """
+        self.layout().activate()
+        needed = self.heightForWidth(self.width())
+        if needed <= 0:
+            needed = self.sizeHint().height()
+        if self.minimumHeight() < needed:
+            self.setMinimumHeight(needed)
+        if self.height() < needed:
+            self.resize(self.width(), needed)
 
     def append_log(self, text: str) -> None:
         self.log_view.appendPlainText(text)
@@ -915,6 +934,7 @@ class SettingsDialog(QDialog):
         self.test_btn.setEnabled(True)
         self.status.setText(("✓ " if ok else "✗ ") + message)
         self.status.setStyleSheet("color:#2e9e6b;" if ok else "color:#d64545;")
+        self._fit_log()
 
     def values(self) -> dict:
         return {
