@@ -850,6 +850,11 @@ class SettingsDialog(QDialog):
         mp_row.addStretch(1)
         layout.addLayout(mp_row)
 
+        # Всё лишнее вертикальное место уходит сюда, поэтому при растягивании
+        # окна блоки (в т.ч. «Мастер-пароль») не разъезжаются: содержимое
+        # держится сверху, а кнопки — снизу.
+        layout.addStretch(1)
+
         # --- блок проверки подключения ---
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)  # режим «бегущей полосы» (спиннер)
