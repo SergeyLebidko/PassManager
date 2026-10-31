@@ -23,7 +23,7 @@ CONFIG_FILE = BASE_DIR / "config.json"
 REMOTE_FILENAME = "vault.txt"
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "webdav_url": "https://example.com/webdav/PassManager",
+    "webdav_url": "",
     "webdav_login": "",
     "webdav_password_enc": "",
     "dark_theme": False,
